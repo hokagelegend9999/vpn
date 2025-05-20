@@ -150,3 +150,32 @@ echo "🔧 Jalankan perintah berikut untuk mulai:"
 echo ""
 echo "    sudo sstp"
 echo ""
+echo ""
+echo "🎉 Instalasi selesai dan menu 'sstp' telah dibuat."
+echo "📢 Contoh langsung membuat akun SSTP awal..."
+
+read -p "Masukkan username pertama: " user
+read -p "Masukkan password: " pass
+
+echo "$user * $pass *" >> /etc/ppp/chap-secrets
+systemctl restart accel-ppp
+
+# Ambil IP Publik Server
+server_ip=$(curl -s ifconfig.me || curl -s ipinfo.io/ip)
+
+echo ""
+echo "======================================"
+echo "🎉 Info Akun SSTP untuk $user"
+echo "Server IP   : $server_ip"
+echo "Username    : $user"
+echo "Password    : $pass"
+echo "Port        : 443"
+echo "Protocol    : SSTP (SSL VPN)"
+echo "======================================"
+echo "💡 Cara Menggunakan:"
+echo "  - Buka VPN SSTP di Windows"
+echo "  - Masukkan IP server di kolom 'Server name or address'"
+echo "  - Gunakan username & password di atas"
+echo "  - Centang 'Allow these protocols' > Microsoft CHAP Version 2"
+echo "  - Hubungkan dan selesai!"
+echo "======================================"
