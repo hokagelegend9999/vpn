@@ -25,6 +25,8 @@ Jalankan satu perintah berikut di server Ubuntu/Debian kamu (akses root diperluk
 wget https://raw.githubusercontent.com/hokagelegend9999/vpn/main/installer-sstp.sh && \
 chmod +x installer-sstp.sh && \
 sudo ./installer-sstp.sh
+```
+
 🛠 Cara Menggunakan Menu SSTP
 Setelah instalasi selesai, jalankan:
 sudo sstp
