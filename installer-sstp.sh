@@ -2,135 +2,152 @@
 
 set -e
 
+echo "🚀 Mulai instalasi SSTP VPN dengan accel-ppp..."
+
+# Update dan install dependensi
 echo "📦 Menginstal dependensi..."
 apt update && apt install -y \
-    build-essential cmake git libpcre3-dev libssl-dev \
-    liblua5.2-dev pkg-config iproute2 openssl
+    build-essential cmake git libpcre3-dev libpcre2-dev \
+    libssl-dev libcurl4-openssl-dev pkg-config \
+    iptables iproute2 ppp gcc g++ uuid-dev
 
-echo "📥 Clone & Build accel-ppp..."
-cd /usr/src
+# Clone accel-ppp
+echo "📥 Clone accel-ppp..."
+cd /usr/src/
+rm -rf accel-ppp
 git clone https://github.com/accel-ppp/accel-ppp.git
 cd accel-ppp
-mkdir build
-cd build
-cmake -DCMAKE_INSTALL_PREFIX=/usr -DCPACK_TYPE=Debian ..
+
+# Build accel-ppp
+mkdir build && cd build
+cmake -DCMAKE_INSTALL_PREFIX=/usr -DKDIR=/lib/modules/$(uname -r)/build ..
 make
 make install
 
-echo "✅ Instalasi accel-ppp selesai!"
+# Buat folder config
+mkdir -p /etc/accel-ppp /var/run/accel-ppp
 
-echo "🧾 Membuat konfigurasi accel-ppp..."
-cp /etc/accel-ppp.conf.dist /etc/accel-ppp.conf
-
-cat > /etc/accel-ppp.conf <<EOF
+# Buat konfigurasi default accel-ppp
+cat <<EOF > /etc/accel-ppp.conf
 [modules]
-log_file
-ppp
+logfile
+pppoe
 sstp
-auth_mschap_v2
+cli
+auth_mschap-v2
 chap-secrets
+radius
 
 [core]
-log-error=/var/log/accel-ppp.log
-thread-count=4
+logfile=/var/log/accel-ppp.log
+loglevel=info
 
-[ppp]
-verbose=1
-min-mtu=1280
-mtu=1400
-mru=1400
-
-[auth]
-chap-secrets=/etc/ppp/chap-secrets
-
-[sstp]
-bind=0.0.0.0:443
-ssl-cert=/etc/ssl/certs/sstp.crt
-ssl-key=/etc/ssl/private/sstp.key
-
-[ip-pool]
-gw-ip=10.0.0.1
-start-ip=10.0.0.2
-end-ip=10.0.0.200
+[cli]
+telnet=127.0.0.1:2000
+password=admin
 
 [dns]
 dns1=8.8.8.8
 dns2=1.1.1.1
+
+[ppp]
+verbose=1
+min-mtu=1200
+mtu=1400
+mru=1400
+ccp=no
+auth=chap-msv2
+chap-secrets=/etc/ppp/chap-secrets
+ipv4=require
+ipv6=disable
+
+[auth]
+any-login=1
+noauth=1
+client-ip-pool=pool1
+
+[ip-pool]
+pool1=192.168.99.10-192.168.99.100
+
+[sstp]
+enabled=yes
+port=443
+ssl-key=/etc/ssl/private/sstp.key
+ssl-cert=/etc/ssl/certs/sstp.crt
+
+[logfile]
+file=/var/log/accel-ppp.log
+level=info
 EOF
 
-echo "🔐 Membuat sertifikat SSL..."
-mkdir -p /etc/ssl/private
+# Setup sertifikat dummy
+mkdir -p /etc/ssl/private /etc/ssl/certs
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-    -keyout /etc/ssl/private/sstp.key -out /etc/ssl/certs/sstp.crt \
-    -subj "/C=ID/ST=Jakarta/L=Jakarta/O=VPN/OU=IT/CN=$(hostname)"
+  -keyout /etc/ssl/private/sstp.key \
+  -out /etc/ssl/certs/sstp.crt \
+  -subj "/C=ID/ST=Jawa/L=Bandung/O=HokageVPN/OU=IT/CN=sstp.local"
 
-echo "📄 Menyiapkan file chap-secrets..."
-touch /etc/ppp/chap-secrets
-chmod 600 /etc/ppp/chap-secrets
+# Enable forwarding
+sysctl -w net.ipv4.ip_forward=1
+echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
 
-echo "🛠️ Membuat menu script SSTP..."
-cat > /usr/local/bin/sstp <<'EOM'
+# Tambah startup service
+cat <<EOF > /etc/systemd/system/accel-ppp.service
+[Unit]
+Description=accel-ppp service
+After=network.target
+
+[Service]
+ExecStart=/usr/sbin/accel-pppd -c /etc/accel-ppp.conf
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reexec
+systemctl enable accel-ppp
+systemctl start accel-ppp
+
+# Buat menu sstp
+cat <<'EOM' > /usr/local/bin/sstp
 #!/bin/bash
-
-USER_FILE="/etc/ppp/chap-secrets"
-
-add_user() {
-    echo -n "Masukkan username: "
-    read username
-    echo -n "Masukkan password: "
-    read -s password
-    echo
-
-    if grep -w "$username" $USER_FILE > /dev/null; then
-        echo "⚠️  User sudah ada!"
-    else
-        echo -e "$username\t*\t$password\t*" | sudo tee -a $USER_FILE > /dev/null
-        echo "✅ Akun SSTP berhasil dibuat!"
-    fi
-    sudo systemctl restart accel-ppp
-}
-
-list_users() {
-    echo "📄 Daftar User SSTP:"
-    sudo awk '{print $1}' $USER_FILE | sort | uniq
-}
-
-delete_user() {
-    echo -n "Masukkan username yang ingin dihapus: "
-    read username
-    if grep -w "$username" $USER_FILE > /dev/null; then
-        sudo sed -i "/^$username\s/d" $USER_FILE
-        echo "🗑️  User $username berhasil dihapus."
-    else
-        echo "⚠️  User tidak ditemukan."
-    fi
-    sudo systemctl restart accel-ppp
-}
-
 while true; do
-    clear
-    echo "========= MENU SSTP USER ========="
-    echo "1. Buat akun SSTP"
-    echo "2. Lihat semua akun"
-    echo "3. Hapus akun SSTP"
-    echo "0. Keluar"
-    echo "=================================="
-    echo -n "Pilih menu: "
-    read choice
-
-    case $choice in
-        1) add_user ;;
-        2) list_users ;;
-        3) delete_user ;;
-        0) exit ;;
-        *) echo "❌ Pilihan tidak valid!" ;;
-    esac
-    echo ""
-    read -p "Tekan Enter untuk kembali ke menu..."
+  echo "========= MENU SSTP USER ========="
+  echo "1. Buat akun SSTP"
+  echo "2. Lihat semua akun"
+  echo "3. Hapus akun SSTP"
+  echo "0. Keluar"
+  echo "=================================="
+  read -p "Pilih menu: " menu
+  case \$menu in
+    1)
+      read -p "Username: " user
+      read -p "Password: " pass
+      echo "\$user * \$pass *" >> /etc/ppp/chap-secrets
+      echo "✅ Akun SSTP berhasil dibuat!"
+      systemctl restart accel-ppp
+      ;;
+    2)
+      echo "📋 Daftar akun SSTP:"
+      cat /etc/ppp/chap-secrets
+      ;;
+    3)
+      read -p "Masukkan username yang akan dihapus: " deluser
+      sed -i "/^\$deluser /d" /etc/ppp/chap-secrets
+      echo "🗑️ Akun \$deluser berhasil dihapus."
+      systemctl restart accel-ppp
+      ;;
+    0)
+      exit 0
+      ;;
+    *)
+      echo "❌ Pilihan tidak valid."
+      ;;
+  esac
 done
 EOM
 
 chmod +x /usr/local/bin/sstp
 
-echo "✅ Instalasi selesai!"
-echo "💻 Ketik 'sstp' untuk membuka menu!"
+echo "✅ Instalasi selesai! Jalankan 'sudo sstp' untuk membuka menu akun SSTP."
