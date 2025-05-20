@@ -1,126 +1,89 @@
 #!/bin/bash
 
-set -e
+clear
+echo "🛠️  Memulai instalasi SSTP Server (accel-ppp)..."
 
-echo "🚀 Memulai proses instalasi SSTP VPN (accel-ppp)..."
+# Update & install dependencies
+apt update -y
+apt install -y build-essential cmake git libpcre3-dev libssl-dev liblua5.1-0-dev \
+libnl-3-dev libnl-genl-3-dev pkg-config iproute2 curl
 
-# Update dan install dependensi
-echo "📦 Memastikan semua dependensi terpasang..."
-apt update && apt install -y \
-    build-essential cmake git libpcre3-dev libpcre2-dev \
-    libssl-dev libcurl4-openssl-dev pkg-config \
-    iptables iproute2 ppp gcc g++ uuid-dev openssl
-
-# Siapkan direktori kerja
-cd /usr/src/
-
-# Hapus accel-ppp jika sudah ada
-if [ -d "accel-ppp" ]; then
-  echo "⚠️  Folder accel-ppp sudah ada. Menghapus folder lama..."
-  rm -rf accel-ppp
+# Clone accel-ppp jika belum ada
+if [ ! -d "/usr/src/accel-ppp" ]; then
+    echo "📥 Clone & Build accel-ppp..."
+    cd /usr/src
+    git clone https://github.com/accel-ppp/accel-ppp.git
+    cd accel-ppp
+    mkdir build && cd build
+    cmake -DCMAKE_INSTALL_PREFIX=/usr -DKDIR=/usr/src/linux-headers-$(uname -r) \
+    -DCPACK_TYPE=Debian -DRADIUS=FALSE -DBUILD_DRIVER=FALSE ..
+    make -j$(nproc)
+    make install
+    cp /usr/src/accel-ppp/doc/etc/accel-ppp.conf.sample /etc/accel-ppp.conf
+else
+    echo "📁 accel-ppp sudah ada, skip clone."
 fi
 
-# Clone accel-ppp terbaru
-echo "📥 Cloning accel-ppp..."
-git clone https://github.com/accel-ppp/accel-ppp.git
-cd accel-ppp
+# Konfigurasi chap-secrets & accel-ppp
+touch /etc/ppp/chap-secrets
 
-# Build
-echo "🔧 Build accel-ppp..."
-mkdir build && cd build
-cmake -DCMAKE_INSTALL_PREFIX=/usr -DKDIR=/lib/modules/$(uname -r)/build ..
-make -j$(nproc)
-make install
-
-# Konfigurasi
-echo "🛠️  Menyiapkan konfigurasi accel-ppp dan SSTP..."
-mkdir -p /etc/accel-ppp /var/run/accel-ppp
-
-# Buat config accel-ppp
 cat <<EOF > /etc/accel-ppp.conf
 [modules]
-logfile
-pppoe
+log-file
+ppp
 sstp
+auth-chap
 cli
-auth_mschap-v2
-chap-secrets
-radius
 
 [core]
-logfile=/var/log/accel-ppp.log
-loglevel=info
+log-error=/var/log/accel-ppp-error.log
+log-info=/var/log/accel-ppp-info.log
 
-[cli]
-telnet=127.0.0.1:2000
-password=admin
+[ppp]
+verbose=1
+min-mtu=1280
+mtu=1400
+mru=1400
+ipv4=require
+ipv6=disable
+
+[sstp]
+bind=0.0.0.0:443
+ssl-key=/etc/ssl/private/ssl.key
+ssl-cert=/etc/ssl/certs/ssl.crt
+
+[auth-chap]
+chap-secrets=/etc/ppp/chap-secrets
+
+[ip-pool]
+gw-ip=192.168.30.1
+pool-start=192.168.30.10
+pool-end=192.168.30.100
+ifname=ppp0
 
 [dns]
 dns1=8.8.8.8
 dns2=1.1.1.1
 
-[ppp]
-verbose=1
-min-mtu=1200
-mtu=1400
-mru=1400
-ccp=no
-auth=chap-msv2
-chap-secrets=/etc/ppp/chap-secrets
-ipv4=require
-ipv6=disable
-
-[auth]
-any-login=1
-noauth=1
-client-ip-pool=pool1
-
-[ip-pool]
-pool1=192.168.99.10-192.168.99.100
-
-[sstp]
-enabled=yes
-port=443
-ssl-key=/etc/ssl/private/sstp.key
-ssl-cert=/etc/ssl/certs/sstp.crt
-
-[logfile]
-file=/var/log/accel-ppp.log
-level=info
+[cli]
+telnet=127.0.0.1:2000
+password=admin
 EOF
 
 # Buat sertifikat SSL self-signed
-echo "🔐 Membuat sertifikat SSL..."
+echo "🔐 Membuat sertifikat SSL self-signed..."
 mkdir -p /etc/ssl/private /etc/ssl/certs
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout /etc/ssl/private/sstp.key \
-  -out /etc/ssl/certs/sstp.crt \
-  -subj "/C=ID/ST=Jakarta/L=Jakarta/O=SSTP-VPN/OU=IT/CN=sstp.local"
+    -keyout /etc/ssl/private/ssl.key \
+    -out /etc/ssl/certs/ssl.crt \
+    -subj "/CN=sstp-server"
 
-# Enable IP forwarding
-sysctl -w net.ipv4.ip_forward=1
-echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
-
-# Systemd service
-cat <<EOF > /etc/systemd/system/accel-ppp.service
-[Unit]
-Description=accel-ppp service
-After=network.target
-
-[Service]
-ExecStart=/usr/sbin/accel-pppd -c /etc/accel-ppp.conf
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reexec
+# Aktifkan accel-ppp
+echo "📦 Mengaktifkan accel-ppp..."
 systemctl enable accel-ppp
-systemctl start accel-ppp
+systemctl restart accel-ppp
 
-# Menu perintah sstp
-echo "📋 Membuat menu sstp..."
+# Install menu sstp
 cat <<'EOM' > /usr/local/bin/sstp
 #!/bin/bash
 while true; do
@@ -137,7 +100,27 @@ while true; do
       read -p "Password: " pass
       echo "$user * $pass *" >> /etc/ppp/chap-secrets
       echo "✅ Akun SSTP berhasil dibuat!"
+
       systemctl restart accel-ppp
+
+      # Ambil IP Publik Server
+      server_ip=$(curl -s ifconfig.me || curl -s ipinfo.io/ip)
+
+      echo "======================================"
+      echo "🎉 Info Akun SSTP untuk $user"
+      echo "Server IP   : $server_ip"
+      echo "Username    : $user"
+      echo "Password    : $pass"
+      echo "Port        : 443"
+      echo "Protocol    : SSTP (SSL VPN)"
+      echo "======================================"
+      echo "💡 Cara Menggunakan:"
+      echo "  - Buka VPN SSTP di Windows"
+      echo "  - Masukkan IP server di kolom 'Server name or address'"
+      echo "  - Gunakan username & password di atas"
+      echo "  - Centang 'Allow these protocols' > Microsoft CHAP Version 2"
+      echo "  - Hubungkan dan selesai!"
+      echo "======================================"
       ;;
     2)
       echo "📋 Daftar akun SSTP:"
@@ -161,4 +144,9 @@ EOM
 
 chmod +x /usr/local/bin/sstp
 
-echo "✅ Instalasi selesai. Jalankan dengan: sudo sstp"
+echo ""
+echo "✅ Instalasi selesai!"
+echo "🔧 Jalankan perintah berikut untuk mulai:"
+echo ""
+echo "    sudo sstp"
+echo ""
