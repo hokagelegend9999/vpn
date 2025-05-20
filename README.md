@@ -21,6 +21,15 @@
 
 Jalankan satu perintah berikut di server Ubuntu/Debian kamu (akses root diperlukan):
 
+
+
+1.
+
+```
+sudo apt update
+sudo apt install -y libpcre2-dev
+```
+
 ```bash
 wget https://raw.githubusercontent.com/hokagelegend9999/vpn/main/installer-sstp.sh && \
 chmod +x installer-sstp.sh && \
