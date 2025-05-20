@@ -2,32 +2,41 @@
 
 set -e
 
-echo "🚀 Mulai instalasi SSTP VPN dengan accel-ppp..."
+echo "🚀 Memulai proses instalasi SSTP VPN (accel-ppp)..."
 
 # Update dan install dependensi
-echo "📦 Menginstal dependensi..."
+echo "📦 Memastikan semua dependensi terpasang..."
 apt update && apt install -y \
     build-essential cmake git libpcre3-dev libpcre2-dev \
     libssl-dev libcurl4-openssl-dev pkg-config \
-    iptables iproute2 ppp gcc g++ uuid-dev
+    iptables iproute2 ppp gcc g++ uuid-dev openssl
 
-# Clone accel-ppp
-echo "📥 Clone accel-ppp..."
+# Siapkan direktori kerja
 cd /usr/src/
-rm -rf accel-ppp
+
+# Hapus accel-ppp jika sudah ada
+if [ -d "accel-ppp" ]; then
+  echo "⚠️  Folder accel-ppp sudah ada. Menghapus folder lama..."
+  rm -rf accel-ppp
+fi
+
+# Clone accel-ppp terbaru
+echo "📥 Cloning accel-ppp..."
 git clone https://github.com/accel-ppp/accel-ppp.git
 cd accel-ppp
 
-# Build accel-ppp
+# Build
+echo "🔧 Build accel-ppp..."
 mkdir build && cd build
 cmake -DCMAKE_INSTALL_PREFIX=/usr -DKDIR=/lib/modules/$(uname -r)/build ..
-make
+make -j$(nproc)
 make install
 
-# Buat folder config
+# Konfigurasi
+echo "🛠️  Menyiapkan konfigurasi accel-ppp dan SSTP..."
 mkdir -p /etc/accel-ppp /var/run/accel-ppp
 
-# Buat konfigurasi default accel-ppp
+# Buat config accel-ppp
 cat <<EOF > /etc/accel-ppp.conf
 [modules]
 logfile
@@ -80,18 +89,19 @@ file=/var/log/accel-ppp.log
 level=info
 EOF
 
-# Setup sertifikat dummy
+# Buat sertifikat SSL self-signed
+echo "🔐 Membuat sertifikat SSL..."
 mkdir -p /etc/ssl/private /etc/ssl/certs
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
   -keyout /etc/ssl/private/sstp.key \
   -out /etc/ssl/certs/sstp.crt \
-  -subj "/C=ID/ST=Jawa/L=Bandung/O=HokageVPN/OU=IT/CN=sstp.local"
+  -subj "/C=ID/ST=Jakarta/L=Jakarta/O=SSTP-VPN/OU=IT/CN=sstp.local"
 
-# Enable forwarding
+# Enable IP forwarding
 sysctl -w net.ipv4.ip_forward=1
 echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
 
-# Tambah startup service
+# Systemd service
 cat <<EOF > /etc/systemd/system/accel-ppp.service
 [Unit]
 Description=accel-ppp service
@@ -109,7 +119,8 @@ systemctl daemon-reexec
 systemctl enable accel-ppp
 systemctl start accel-ppp
 
-# Buat menu sstp
+# Menu perintah sstp
+echo "📋 Membuat menu sstp..."
 cat <<'EOM' > /usr/local/bin/sstp
 #!/bin/bash
 while true; do
@@ -120,11 +131,11 @@ while true; do
   echo "0. Keluar"
   echo "=================================="
   read -p "Pilih menu: " menu
-  case \$menu in
+  case $menu in
     1)
       read -p "Username: " user
       read -p "Password: " pass
-      echo "\$user * \$pass *" >> /etc/ppp/chap-secrets
+      echo "$user * $pass *" >> /etc/ppp/chap-secrets
       echo "✅ Akun SSTP berhasil dibuat!"
       systemctl restart accel-ppp
       ;;
@@ -134,8 +145,8 @@ while true; do
       ;;
     3)
       read -p "Masukkan username yang akan dihapus: " deluser
-      sed -i "/^\$deluser /d" /etc/ppp/chap-secrets
-      echo "🗑️ Akun \$deluser berhasil dihapus."
+      sed -i "/^$deluser /d" /etc/ppp/chap-secrets
+      echo "🗑️ Akun $deluser berhasil dihapus."
       systemctl restart accel-ppp
       ;;
     0)
@@ -150,4 +161,4 @@ EOM
 
 chmod +x /usr/local/bin/sstp
 
-echo "✅ Instalasi selesai! Jalankan 'sudo sstp' untuk membuka menu akun SSTP."
+echo "✅ Instalasi selesai. Jalankan dengan: sudo sstp"
