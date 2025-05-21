@@ -10,6 +10,12 @@ PURPLE='\033[0;38;5;165m'
 ORANGE='\033[0;38;5;208m'
 NC='\033[0m' # No Color
 
+# Get system information
+OS_INFO=$(source /etc/os-release && echo "$PRETTY_NAME")
+PUBLIC_IP=$(curl -s ifconfig.me)
+CITY=$(curl -s ipinfo.io/$PUBLIC_IP | jq -r '.city // "Unknown"')
+DOMAIN=$(hostname -d 2>/dev/null || echo "No domain")
+
 # Text Gradient
 gradient() {
     local text=$1
@@ -47,8 +53,13 @@ display_header() {
     gradient "                H O K A G E   V P N   M A N A G E R  P R O               "
     echo -e "\n${PURPLE}╚════════════════════════════════════════════════════════════════════╝${NC}"
     echo -e "${BLUE}┌──────────────────────────────┬──────────────────────────────────────┐${NC}"
-    echo -e "${BLUE}│ ${CYAN}● SSTP Service${BLUE}             │ $(check_service) ${BLUE}                         │${NC}"
-    echo -e "${BLUE}│ ${CYAN}● PPTP Service${BLUE}             │ $(check_service) ${BLUE}                         │${NC}"
+    echo -e "${BLUE}│ ${CYAN}● OS${BLUE}                     │ ${YELLOW}$OS_INFO${BLUE} $(printf '%.0s ' {1..$((30 - ${#OS_INFO}))│${NC}"
+    echo -e "${BLUE}│ ${CYAN}● Public IP${BLUE}              │ ${YELLOW}$PUBLIC_IP${BLUE} $(printf '%.0s ' {1..$((30 - ${#PUBLIC_IP}))│${NC}"
+    echo -e "${BLUE}│ ${CYAN}● Location${BLUE}               │ ${YELLOW}$CITY${BLUE} $(printf '%.0s ' {1..$((30 - ${#CITY}))│${NC}"
+    echo -e "${BLUE}│ ${CYAN}● Domain${BLUE}                 │ ${YELLOW}$DOMAIN${BLUE} $(printf '%.0s ' {1..$((30 - ${#DOMAIN}))│${NC}"
+    echo -e "${BLUE}├──────────────────────────────┼──────────────────────────────────────┤${NC}"
+    echo -e "${BLUE}│ ${CYAN}● SSTP Service${BLUE}           │ $(check_service) ${BLUE}                         │${NC}"
+    echo -e "${BLUE}│ ${CYAN}● PPTP Service${BLUE}           │ $(check_service) ${BLUE}                         │${NC}"
     echo -e "${BLUE}└──────────────────────────────┴──────────────────────────────────────┘${NC}"
     echo ""
 }
