@@ -40,46 +40,81 @@ gradient() {
     echo -ne "${output}${NC}"
 }
 
-# Enhanced Service Status Check
+# Enhanced VPN Service Status Check
 check_vpn_service() {
     local service_name=$1
     local port=$2
     local protocol=$3
     
-    # Check if service process is running
+    # Check if service is installed
+    if ! command -v $service_name >/dev/null 2>&1 && ! systemctl list-unit-files | grep -q $service_name; then
+        echo -e "${RED}● NOT INSTALLED${NC}"
+        return
+    fi
+
+    # Check service status
     case $service_name in
         "pptpd")
-            if pgrep pptpd >/dev/null; then
-                status="${GREEN}● RUNNING${NC}"
+            # First try systemctl, then check process
+            if systemctl is-active --quiet $service_name 2>/dev/null || pgrep pptpd >/dev/null; then
+                service_status="${GREEN}● RUNNING${NC}"
             else
-                status="${RED}● STOPPED${NC}"
+                service_status="${RED}● STOPPED${NC}"
+            fi
+            
+            # Check port
+            if ss -tuln | grep -q ":$port "; then
+                port_status="${GREEN}✓${NC}"
+            else
+                port_status="${RED}✗${NC}"
+                # Special check for PPTP which uses GRE protocol (not TCP/UDP)
+                if ping -c 1 -w 1 $PUBLIC_IP | grep -q "ttl"; then
+                    port_status="${GREEN}✓ (GRE)${NC}"
+                    service_status="${GREEN}● RUNNING${NC}"
+                fi
             fi
             ;;
-        "accel-ppp"|"xl2tpd")
+            
+        "accel-ppp")
             if systemctl is-active --quiet $service_name 2>/dev/null; then
-                status="${GREEN}● RUNNING${NC}"
+                service_status="${GREEN}● RUNNING${NC}"
             else
-                status="${RED}● STOPPED${NC}"
+                service_status="${RED}● STOPPED${NC}"
+            fi
+            
+            if ss -tuln | grep -q ":$port "; then
+                port_status="${GREEN}✓${NC}"
+            else
+                port_status="${RED}✗${NC}"
             fi
             ;;
+            
+        "xl2tpd")
+            if systemctl is-active --quiet $service_name 2>/dev/null; then
+                service_status="${GREEN}● RUNNING${NC}"
+            else
+                service_status="${RED}● STOPPED${NC}"
+            fi
+            
+            if ss -tuln | grep -q ":$port "; then
+                port_status="${GREEN}✓${NC}"
+            else
+                port_status="${RED}✗${NC}"
+                # L2TP might be running but not showing in ss due to encapsulation
+                if ipsec status | grep -q "INSTALLED"; then
+                    port_status="${GREEN}✓ (IPSec)${NC}"
+                    service_status="${GREEN}● RUNNING${NC}"
+                fi
+            fi
+            ;;
+            
         *)
-            status="${RED}● UNKNOWN SERVICE${NC}"
+            service_status="${RED}● UNKNOWN SERVICE${NC}"
+            port_status="${YELLOW}?${NC}"
             ;;
     esac
     
-    # Additional port check
-    if [ -n "$port" ]; then
-        if ss -tuln | grep -q ":$port "; then
-            port_status="${GREEN}✓${NC}"
-        else
-            port_status="${RED}✗${NC}"
-            status="${RED}● PORT NOT LISTENING${NC}"
-        fi
-    else
-        port_status="${YELLOW}?${NC}"
-    fi
-    
-    echo -e "$status (Port $port: $port_status)"
+    echo -e "$service_status (Port $port: $port_status)"
 }
 
 # Path
@@ -130,6 +165,32 @@ calculate_expiry() {
     fi
 }
 
+# VPN Service Management
+manage_vpn_service() {
+    local service=$1
+    local action=$2
+    
+    case $service in
+        "pptpd")
+            if [[ $action == "restart" ]]; then
+                systemctl restart pptpd 2>/dev/null || service pptpd restart 2>/dev/null
+                # Ensure GRE protocol is allowed
+                iptables -I INPUT -p gre -j ACCEPT
+            fi
+            ;;
+        "accel-ppp")
+            systemctl $action accel-ppp 2>/dev/null
+            ;;
+        "xl2tpd")
+            systemctl $action xl2tpd 2>/dev/null
+            # Restart IPSec if L2TP is being restarted
+            if [[ $action == "restart" ]]; then
+                systemctl restart ipsec 2>/dev/null
+            fi
+            ;;
+    esac
+}
+
 # Main Menu
 while true; do
     display_header
@@ -140,11 +201,12 @@ while true; do
     echo -e "${CYAN}│ ${BLUE}2. ${YELLOW}➖ Delete user account${NC}                                        │"
     echo -e "${CYAN}│ ${BLUE}3. ${YELLOW}👥 View all users${NC}                                            │"
     echo -e "${CYAN}│ ${BLUE}4. ${YELLOW}🔄 Restart VPN Services${NC}                                      │"
+    echo -e "${CYAN}│ ${BLUE}5. ${YELLOW}🔧 Fix VPN Services${NC}                                          │"
     echo -e "${CYAN}│ ${BLUE}0. ${YELLOW}🚪 Exit${NC}                                                      │"
     echo -e "${CYAN}└────────────────────────────────────────────────────────────────────┘${NC}"
     echo ""
     
-    read -rp "$(echo -e "${YELLOW}▶ Select option [0-4]: ${NC}")" choice
+    read -rp "$(echo -e "${YELLOW}▶ Select option [0-5]: ${NC}")" choice
 
     case "$choice" in
         1)
@@ -193,8 +255,32 @@ while true; do
             ;;
         4)
             echo -e "${YELLOW}Restarting VPN services...${NC}"
-            systemctl restart pptpd accel-ppp xl2tpd
+            manage_vpn_service pptpd restart
+            manage_vpn_service accel-ppp restart
+            manage_vpn_service xl2tpd restart
             echo -e "${GREEN}✔ VPN services restarted successfully${NC}"
+            sleep 2
+            ;;
+        5)
+            echo -e "${YELLOW}Attempting to fix VPN services...${NC}"
+            
+            # Fix PPTP
+            if ! pgrep pptpd >/dev/null; then
+                echo -e "${BLUE}▶ Starting PPTP service...${NC}"
+                manage_vpn_service pptpd start
+                iptables -I INPUT -p gre -j ACCEPT
+            fi
+            
+            # Fix L2TP
+            if ! systemctl is-active --quiet xl2tpd; then
+                echo -e "${BLUE}▶ Starting L2TP/IPSec services...${NC}"
+                manage_vpn_service xl2tpd start
+                systemctl start ipsec 2>/dev/null
+                iptables -I INPUT -p udp --dport 500 -j ACCEPT
+                iptables -I INPUT -p udp --dport 4500 -j ACCEPT
+            fi
+            
+            echo -e "${GREEN}✔ VPN service fixes attempted${NC}"
             sleep 2
             ;;
         0)
@@ -202,7 +288,7 @@ while true; do
             exit 0
             ;;
         *)
-            echo -e "${RED}⚠ Invalid option! Please select between 0-4.${NC}"
+            echo -e "${RED}⚠ Invalid option! Please select between 0-5.${NC}"
             sleep 1
             ;;
     esac
