@@ -82,7 +82,7 @@ ipv4=require
 ipv6=disable
 
 [sstp]
-bind=0.0.0.0:443
+bind=0.0.0.0:8010
 ssl-key=/etc/ssl/private/ssl.key
 ssl-cert=/etc/ssl/certs/ssl.crt
 
