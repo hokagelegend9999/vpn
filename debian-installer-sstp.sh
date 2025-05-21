@@ -111,10 +111,20 @@ After=network.target
 
 [Service]
 Type=forking
-ExecStart=/usr/sbin/accel-pppd -c /etc/accel-ppp.conf -p /var/run/accel-pppd.pid
-PIDFile=/var/run/accel-pppd.pid
+ExecStart=/usr/sbin/accel-pppd -c /etc/accel-ppp.conf -d -p /run/accel-pppd.pid
+PIDFile=/run/accel-pppd.pid
 Restart=on-failure
 RestartSec=5s
+TimeoutStartSec=30
+
+# Create PID directory
+RuntimeDirectory=accel-ppp
+RuntimeDirectoryMode=0755
+
+# Security
+PrivateTmp=true
+ProtectSystem=full
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
