@@ -1,5 +1,12 @@
 # 🚀 SSTP VPN Installer for Ubuntu/Debian
 
+
+<p align="center">
+  <img src="https://github.com/hokagelegend9999/vpn/blob/main/sstp.jpg?raw=true" alt="Tampilan Menu" width="600"/>
+</p>
+
+
+
 **Installer otomatis dan mudah** untuk setup **SSTP VPN Server** menggunakan **accel-ppp** di Ubuntu/Debian.
 
 ---
