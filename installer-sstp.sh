@@ -1,95 +1,77 @@
 #!/bin/bash
 
-# ================================================
-# VPN ALL-IN-ONE INSTALLER (PPTP + SSTP + OpenVPN)
-# Version: 3.0
-# Tested on: Ubuntu 20.04/22.04
-# ================================================
+# =============================================
+# HOKAGE VPN Installer - Ultimate Ninja Edition
+# Version: 5.2 - Complete Ready-to-Use Package
+# =============================================
 
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-# Check root
-if [ "$(id -u)" -ne 0 ]; then
-  echo -e "${RED}Error: Script must be run as root${NC}"
-  exit 1
-fi
-
-# Header
-echo -e "${BLUE}"
-cat << "EOF"
-   ____   _____ _____   _____   _____ _____ 
-  / __ \ / ____|  __ \ / ____| / ____|  __ \
- | |  | | (___ | |__) | |  __ | |    | |__) |
- | |  | |\___ \|  ___/| | |_ || |    |  ___/ 
- | |__| |____) | |    | |__| || |____| |     
-  \____/|_____/|_|     \_____(_)_____|_|     
-EOF
-echo -e "${NC}"
-
-# Function to install PPTP
-install_pptp() {
-  echo -e "\n${YELLOW}[1/3] Installing PPTP VPN...${NC}"
-  apt install -y pptpd
-  
-  # Configure PPTP
-  cat > /etc/pptpd.conf << EOL
-option /etc/ppp/pptpd-options
-logwtmp
-localip 192.168.50.1
-remoteip 192.168.50.100-200
-EOL
-
-  # Configure PPP options
-  sed -i 's/#ms-dns 10.0.0.1/ms-dns 8.8.8.8/' /etc/ppp/pptpd-options
-  sed -i 's/#ms-dns 10.0.0.2/ms-dns 8.8.4.4/' /etc/ppp/pptpd-options
-
-  # Enable IP forwarding
-  sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
-  sysctl -p
-
-  # Firewall rules
-  iptables -t nat -A POSTROUTING -o $(ip route | grep default | awk '{print $5}') -j MASQUERADE
-  iptables-save > /etc/iptables.rules
-
-  # Add sample user
-  echo "vpnuser pptpd vpnpassword *" >> /etc/ppp/chap-secrets
-
-  systemctl restart pptpd
-  systemctl enable pptpd
+show_banner() {
+    clear
+    echo -e "${PURPLE}"
+    echo " _    ____  _  ______  __________  "
+    echo "/ \  /  _ \/ |/ /  _ \/  __/  __/  "
+    echo "| |_|| / \||   /| / \|| |  |  \    "
+    echo "| | || \_/||   \| |-||| |_//  /_   "
+    echo "\_/ \\____/\_|\_\_/ \|\____\____\  "
+    echo -e "${NC}"
+    echo -e "${BLUE}» NINJA VPN CONTROL PANEL «${NC}"
+    echo -e "${YELLOW}$(date '+%A, %d %B %Y %H:%M:%S')${NC}"
+    echo -e "${CYAN}══════════════════════════════${NC}"
 }
 
-# Function to install SSTP
-install_sstp() {
-  echo -e "\n${YELLOW}[2/3] Installing SSTP VPN...${NC}"
-  
-  # Install dependencies
-  apt install -y build-essential cmake libssl-dev libpcre3-dev
-  
-  # Install accel-ppp
-  cd /usr/src
-  git clone https://github.com/accel-ppp/accel-ppp.git
-  cd accel-ppp
-  mkdir build && cd build
-  cmake -DCMAKE_INSTALL_PREFIX=/usr -DKDIR=/usr/src/linux-headers-$(uname -r) ..
-  make -j$(nproc)
-  make install
+cleanup() {
+    show_banner
+    echo -e "${YELLOW}[!] Cleaning old installations...${NC}"
+    sudo systemctl stop accel-ppp 2>/dev/null
+    sudo pkill -9 accel-pppd 2>/dev/null
+    sudo rm -rf /usr/src/accel-ppp /etc/accel-ppp.conf /var/log/accel-ppp
+    echo -e "${GREEN}[✓] System purified!${NC}"
+    sleep 2
+}
 
-  # Generate SSL certs
-  mkdir -p /etc/ssl/{private,certs}
-  openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-    -keyout /etc/ssl/private/sstp.key \
-    -out /etc/ssl/certs/sstp.crt \
-    -subj "/CN=sstp-server"
+install_deps() {
+    show_banner
+    echo -e "\n${CYAN}» Installing ninja tools...${NC}"
+    sudo apt update -y && sudo apt install -y \
+        build-essential cmake git libssl-dev \
+        libpcre3-dev liblua5.1-0-dev libnl-3-dev \
+        libnl-genl-3-dev pkg-config iproute2 curl openssl
+    echo -e "${GREEN}[✓] Tools ready!${NC}"
+    sleep 2
+}
 
-  # Create config
-  cat > /etc/accel-ppp.conf << EOL
+install_accel() {
+    show_banner
+    echo -e "\n${CYAN}» Compiling shadow techniques...${NC}"
+    cd /usr/src
+    sudo git clone https://github.com/accel-ppp/accel-ppp.git
+    cd accel-ppp
+    git checkout 1.12.0
+    mkdir build && cd build
+    cmake -DCMAKE_INSTALL_PREFIX=/usr \
+          -DRADIUS=FALSE -DBUILD_DRIVER=FALSE ..
+    make -j$(nproc) && sudo make install
+    echo -e "${GREEN}[✓] Techniques mastered!${NC}"
+    sleep 2
+}
+
+configure_service() {
+    show_banner
+    echo -e "\n${CYAN}» Configuring ninja scrolls...${NC}"
+    
+    sudo mkdir -p /var/log/accel-ppp
+    
+    sudo tee /etc/accel-ppp.conf > /dev/null <<'ACCEL_EOF'
 [modules]
-log-file
 ppp
 sstp
 auth-chap
@@ -104,143 +86,213 @@ mtu=1400
 mru=1400
 
 [sstp]
-bind=0.0.0.0:4443
-ssl-key=/etc/ssl/private/sstp.key
-ssl-cert=/etc/ssl/certs/sstp.crt
+bind=0.0.0.0:4433
+ssl-key=/etc/ssl/private/ssl.key
+ssl-cert=/etc/ssl/certs/ssl.crt
 
 [auth-chap]
 chap-secrets=/etc/ppp/chap-secrets
 
 [ip-pool]
-gw-ip=192.168.60.1
-pool-start=192.168.60.100
-pool-end=192.168.60.200
-EOL
+gw-ip=192.168.90.1
+pool-start=192.168.90.10
+pool-end=192.168.90.100
+ACCEL_EOF
 
-  # Create systemd service
-  cat > /etc/systemd/system/accel-ppp.service << EOL
+    sudo tee /etc/systemd/system/accel-ppp.service > /dev/null <<'SERVICE_EOF'
 [Unit]
-Description=Accel-PPP Server
+Description=HOKAGE VPN Server
 After=network.target
 
 [Service]
 Type=forking
-ExecStart=/usr/sbin/accel-pppd -c /etc/accel-ppp.conf
-Restart=always
-RestartSec=5s
+ExecStart=/usr/sbin/accel-pppd -c /etc/accel-ppp.conf -p /run/accel-pppd.pid
+PIDFile=/run/accel-pppd.pid
+Restart=on-failure
+TimeoutStartSec=60s
+Environment="ACCEL_PPP_DEBUG=99"
 
 [Install]
 WantedBy=multi-user.target
-EOL
+SERVICE_EOF
 
-  systemctl daemon-reload
-  systemctl start accel-ppp
-  systemctl enable accel-ppp
+    sudo mkdir -p /etc/ssl/{private,certs}
+    sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout /etc/ssl/private/ssl.key \
+        -out /etc/ssl/certs/ssl.crt \
+        -subj "/CN=hokage-server"
+    sudo chmod 600 /etc/ssl/private/ssl.key
+    
+    echo -e "${GREEN}[✓] Scrolls encrypted!${NC}"
+    sleep 2
 }
 
-# Function to install OpenVPN
-install_openvpn() {
-  echo -e "\n${YELLOW}[3/3] Installing OpenVPN...${NC}"
-  
-  apt install -y openvpn easy-rsa
-  
-  # Setup CA
-  make-cadir ~/openvpn-ca
-  cd ~/openvpn-ca
-  
-  # Configure vars
-  sed -i 's/KEY_NAME="EasyRSA"/KEY_NAME="server"/' vars
-  sed -i 's/KEY_COUNTRY="US"/KEY_COUNTRY="ID"/' vars
-  sed -i 's/KEY_PROVINCE="CA"/KEY_PROVINCE="JAVA"/' vars
-  sed -i 's/KEY_CITY="SanFrancisco"/KEY_CITY="Jakarta"/' vars
-  sed -i 's/KEY_ORG="Copyleft"/KEY_ORG="MyVPN"/' vars
-  sed -i 's/KEY_EMAIL="me@example.com"/KEY_EMAIL="admin@example.com"/' vars
-  sed -i 's/KEY_OU="MyOrganizationalUnit"/KEY_OU="IT"/' vars
-  
-  # Build CA and server certs
-  source vars
-  ./clean-all
-  ./build-ca --batch
-  ./build-key-server --batch server
-  ./build-dh
-  openvpn --genkey --secret keys/ta.key
-  
-  # Install certs
-  cd ~/openvpn-ca/keys
-  cp server.crt server.key ca.crt dh2048.pem ta.key /etc/openvpn/
-  
-  # Configure server
-  gunzip -c /usr/share/doc/openvpn/examples/sample-config-files/server.conf.gz > /etc/openvpn/server.conf
-  
-  # Modify config
-  sed -i 's/;push "redirect-gateway def1 bypass-dhcp"/push "redirect-gateway def1 bypass-dhcp"/' /etc/openvpn/server.conf
-  sed -i 's/;push "dhcp-option DNS 208.67.222.222"/push "dhcp-option DNS 8.8.8.8"\npush "dhcp-option DNS 8.8.4.4"/' /etc/openvpn/server.conf
-  sed -i 's/;user nobody/user nobody/' /etc/openvpn/server.conf
-  sed -i 's/;group nogroup/group nogroup/' /etc/openvpn/server.conf
-  echo -e "\n# Additional config\nkeepalive 10 120\ncomp-lzo no\npersist-key\npersist-tun" >> /etc/openvpn/server.conf
-  
-  # Enable IP forwarding
-  sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
-  sysctl -p
-  
-  # Firewall rules
-  iptables -t nat -A POSTROUTING -o $(ip route | grep default | awk '{print $5}') -j MASQUERADE
-  iptables-save > /etc/iptables.rules
-  
-  systemctl start openvpn@server
-  systemctl enable openvpn@server
-  
-  # Generate client config
-  mkdir -p ~/client-configs/files
-  cat > ~/client-configs/base.conf << EOL
-client
-dev tun
-proto udp
-remote $(curl -s ifconfig.me) 1194
-resolv-retry infinite
-nobind
-persist-key
-persist-tun
-remote-cert-tls server
-cipher AES-256-CBC
-comp-lzo no
-verb 3
-EOL
+create_ui() {
+    show_banner
+    echo -e "\n${CYAN}» Creating ninja interface...${NC}"
+    
+    sudo tee /usr/local/bin/hokage > /dev/null <<'UI_EOF'
+#!/bin/bash
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+show_banner() {
+    clear
+    echo -e "${PURPLE}"
+    echo " _    ____  _  ______  __________  "
+    echo "/ \  /  _ \/ |/ /  _ \/  __/  __/  "
+    echo "| |_|| / \||   /| / \|| |  |  \    "
+    echo "| | || \_/||   \| |-||| |_//  /_   "
+    echo "\_/ \\____/\_|\_\_/ \|\____\____\  "
+    echo -e "${NC}"
+    echo -e "${BLUE}» NINJA VPN CONTROL PANEL «${NC}"
+    echo -e "Status: $([ -f /run/accel-pppd.pid ] && echo -e "${GREEN}● ACTIVE${NC}" || echo -e "${RED}● INACTIVE${NC}")"
+    echo -e "${YELLOW}$(date '+%A, %d %B %Y %H:%M:%S')${NC}"
+    echo -e "${CYAN}══════════════════════════════${NC}"
 }
 
-# Main installation
+while true; do
+    show_banner
+    
+    echo -e "${GREEN}"
+    echo "1. Create New Shadow Warrior"
+    echo "2. List All Warriors"
+    echo "3. Remove Warrior"
+    echo -e "${YELLOW}"
+    echo "4. Activate/Recharge Technique"
+    echo "5. Deactivate Technique"
+    echo -e "${BLUE}"
+    echo "6. View Battle Logs"
+    echo -e "${RED}"
+    echo "0. Exit Shadow Realm"
+    echo -e "${CYAN}"
+    echo "══════════════════════════════"
+    echo -e "${NC}"
+    
+    read -p "Select jutsu [0-6]: " choice
+    
+    case $choice in
+        1)
+            read -p "Warrior Name: " user
+            read -p "Secret Code: " pass
+            echo "$user * $pass *" | sudo tee -a /etc/ppp/chap-secrets >/dev/null
+            sudo systemctl restart accel-ppp
+            echo -e "\n${GREEN}»» WARRIOR INITIATED ««${NC}"
+            echo -e "Fortress: $(curl -s ifconfig.me)"
+            echo -e "Gate: 4433"
+            echo -e "Name: ${YELLOW}$user${NC}"
+            echo -e "Code: ${YELLOW}$pass${NC}"
+            ;;
+        2)
+            echo -e "\n${BLUE}» SHADOW WARRIOR ROSTER «${NC}"
+            sudo cat /etc/ppp/chap-secrets | awk '{print $1,$3}' | column -t
+            ;;
+        3)
+            read -p "Warrior to eliminate: " deluser
+            sudo sed -i "/^$deluser /d" /etc/ppp/chap-secrets
+            sudo systemctl restart accel-ppp
+            echo -e "${GREEN}Warrior $deluser vanished!${NC}"
+            ;;
+        4)
+            sudo systemctl restart accel-ppp
+            sleep 2
+            echo -e "${YELLOW}Ninja technique recharged!${NC}"
+            ;;
+        5)
+            sudo systemctl stop accel-ppp
+            echo -e "${RED}Technique suspended...${NC}"
+            ;;
+        6)
+            echo -e "\n${BLUE}» BATTLE CHRONICLES «${NC}"
+            sudo tail -20 /var/log/accel-ppp/error.log | sed 's/error/Ninja Alert/g'
+            ;;
+        0)
+            echo -e "${BLUE}Vanishing into the mist...${NC}"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Invalid jutsu!${NC}"
+            ;;
+    esac
+    
+    read -p "Press Enter to continue..."
+done
+UI_EOF
+
+    sudo chmod +x /usr/local/bin/hokage
+    echo -e "${GREEN}[✓] Ninja interface ready!${NC}"
+    sleep 2
+}
+
+post_install() {
+    show_banner
+    echo -e "\n${CYAN}» Finalizing ninja deployment...${NC}"
+    
+    # Backup existing cron
+    sudo crontab -l > ~/cron_backup.txt 2>/dev/null
+    echo -e "${YELLOW}[!] Cron backup saved to ~/cron_backup.txt${NC}"
+    
+    # Ensure tendang cron job exists
+    if ! crontab -l | grep -q "/usr/bin/tendang"; then
+        echo -e "${YELLOW}[!] Restoring tendang technique...${NC}"
+        (crontab -l 2>/dev/null; echo "*/5 * * * * /usr/bin/tendang") | crontab -
+    fi
+    
+    # Verify service status
+    if systemctl is-active --quiet accel-ppp; then
+        echo -e "${GREEN}[✓] HOKAGE VPN is active${NC}"
+    else
+        echo -e "${RED}[!] VPN service not running!${NC}"
+        echo -e "${YELLOW}Trying to start...${NC}"
+        sudo systemctl start accel-ppp
+    fi
+    
+    sleep 2
+}
+
 main() {
-  # Update system
-  echo -e "${YELLOW}[+] Updating system packages...${NC}"
-  apt update -y && apt upgrade -y
-  
-  # Install all VPN services
-  install_pptp
-  install_sstp
-  install_openvpn
-  
-  # Final touches
-  echo -e "\n${GREEN}[+] Installation complete!${NC}"
-  echo -e "\n${BLUE}=== VPN Configuration Summary ===${NC}"
-  echo -e "PPTP:"
-  echo -e "  Port: 1723/tcp"
-  echo -e "  Users: /etc/ppp/chap-secrets"
-  echo -e "  Test: sudo pptpd -f"
-  
-  echo -e "\nSSTP:"
-  echo -e "  Port: 4443/tcp"
-  echo -e "  Config: /etc/accel-ppp.conf"
-  echo -e "  Logs: /var/log/accel-ppp/"
-  
-  echo -e "\nOpenVPN:"
-  echo -e "  Port: 1194/udp"
-  echo -e "  Config: /etc/openvpn/server.conf"
-  echo -e "  Client config: ~/client-configs/"
-  
-  echo -e "\n${GREEN}To manage users:"
-  echo -e "  PPTP/SSTP: Edit /etc/ppp/chap-secrets"
-  echo -e "  OpenVPN: Generate client configs in ~/client-configs/${NC}"
+    show_banner
+    echo -e "${PURPLE}"
+    echo "══════════════════════════════"
+    echo " HOKAGE VPN NINJA INSTALLATION"
+    echo "══════════════════════════════"
+    echo -e "${NC}"
+    sleep 2
+    
+    cleanup
+    install_deps
+    install_accel
+    configure_service
+    create_ui
+    post_install
+    
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now accel-ppp
+    
+    show_banner
+    echo -e "${GREEN}"
+    echo "══════════════════════════════"
+    echo " NINJA VPN READY FOR DEPLOYMENT"
+    echo ""
+    echo " To access the shadow panel:"
+    echo ""
+    echo "    ${YELLOW}sudo hokage${GREEN}"
+    echo ""
+    echo " Compatible with:"
+    echo " - Your tendang technique"
+    echo " - HOKAGE VPN (port 4433)"
+    echo ""
+    echo " Fortress: ${CYAN}$(curl -s ifconfig.me)${GREEN}"
+    echo " Secret Gate: ${CYAN}4433${GREEN}"
+    echo "══════════════════════════════"
+    echo -e "${NC}"
 }
 
-# Execute
 main
