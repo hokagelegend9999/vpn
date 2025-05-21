@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Warna
+# Colors
 BLUE='\033[0;38;5;27m'
 CYAN='\033[0;38;5;45m'
 GREEN='\033[0;38;5;46m'
@@ -10,13 +10,24 @@ PURPLE='\033[0;38;5;165m'
 ORANGE='\033[0;38;5;208m'
 NC='\033[0m' # No Color
 
-# System Info
+# System Information
+ISP=$(cat /etc/xray/isp 2>/dev/null || echo "Unknown ISP")
+CITY=$(cat /etc/xray/city 2>/dev/null || echo "Unknown City")
+IPVPS=$(curl -s ipv4.icanhazip.com || echo "Unknown")
+DOMAIN=$(cat /etc/xray/domain 2>/dev/null || hostname -d 2>/dev/null || echo "No domain")
+RAM=$(free -m | awk 'NR==2 {print $2}')
+USAGERAM=$(free -m | awk 'NR==2 {print $3}')
+MEMOFREE=$(free -m | awk 'NR==2{printf "%.2f%%", $3*100/$2 }')
+LOADCPU=$(top -bn1 | awk '/Cpu/ { cpu = "" 100 - $8 "%" }; END { print cpu }')
 OS_INFO=$(source /etc/os-release && echo "$PRETTY_NAME")
-PUBLIC_IP=$(curl -s ifconfig.me)
+CORE=$(nproc)
+DATEVPS=$(date +'%d/%m/%Y')
+TIMEZONE=$(date +'%H:%M:%S')
+UPTIME=$(uptime -p | cut -d " " -f 2-)
+PUBLIC_IP=$(curl -s ifconfig.me || echo "Unknown")
 CITY=$(curl -s ipinfo.io/$PUBLIC_IP | jq -r '.city // "Unknown"')
-DOMAIN=$(hostname -d 2>/dev/null || echo "No domain")
 
-# Gradient Text (tidak diubah)
+# Gradient Text
 gradient() {
     local text=$1
     local length=${#text}
@@ -31,8 +42,8 @@ gradient() {
 
 # Check Service Status
 check_service() {
-    systemctl is-active accel-ppp &> /dev/null
-    if [ $? -eq 0 ]; then
+    service_name=$1
+    if systemctl is-active --quiet $service_name; then
         echo -e "${GREEN}● RUNNING${NC}"
     else
         echo -e "${RED}● STOPPED${NC}"
@@ -50,6 +61,24 @@ display_header() {
     echo -e "${PURPLE}╔════════════════════════════════════════════════════════════════════╗"
     gradient "                H O K A G E   V P N   M A N A G E R  P R O               "
     echo -e "\n${PURPLE}╚════════════════════════════════════════════════════════════════════╝${NC}"
+    
+    # System Information Display
+    echo -e "${CYAN}┌─────────────────────── SYSTEM INFORMATION ───────────────────────┐"
+    echo -e "${CYAN}│ ${YELLOW}🖥️ OS          : ${OS_INFO}"
+    echo -e "${CYAN}│ ${YELLOW}🏢 ISP         : ${ISP} (${CITY})"
+    echo -e "${CYAN}│ ${YELLOW}🌐 IP Address  : ${PUBLIC_IP} (${CITY})"
+    echo -e "${CYAN}│ ${YELLOW}🔌 Domain      : ${DOMAIN}"
+    echo -e "${CYAN}│ ${YELLOW}📅 Date        : ${DATEVPS} | 🕒 Time: ${TIMEZONE}"
+    echo -e "${CYAN}│ ${YELLOW}⏱️ Uptime      : ${UPTIME}"
+    echo -e "${CYAN}│ ${YELLOW}💾 RAM Usage   : ${USAGERAM}MB / ${RAM}MB (${MEMOFREE})"
+    echo -e "${CYAN}│ ${YELLOW}⚡ CPU Load    : ${LOADCPU} | Cores: ${CORE}"
+    echo -e "${CYAN}└──────────────────────────────────────────────────────────────────┘${NC}"
+    echo -e "${CYAN}┌─────────────────────── SERVICE STATUS ──────────────────────────┐"
+    echo -e "${CYAN}│ ${YELLOW}🔌 SSTP Service : $(check_service accel-ppp)"
+    echo -e "${CYAN}│ ${YELLOW}🌐 Xray Service : $(check_service xray)"
+    echo -e "${CYAN}│ ${YELLOW}🛡️ SSH Service  : $(check_service sshd)"
+    echo -e "${CYAN}└──────────────────────────────────────────────────────────────────┘${NC}"
+    echo ""
 }
 
 # Calculate expiry
@@ -78,11 +107,12 @@ while true; do
     echo -e "${CYAN}│ ${BLUE}1. ${YELLOW}➕ Create new user account${NC}                                     │"
     echo -e "${CYAN}│ ${BLUE}2. ${YELLOW}➖ Delete user account${NC}                                        │"
     echo -e "${CYAN}│ ${BLUE}3. ${YELLOW}👥 View all users${NC}                                            │"
+    echo -e "${CYAN}│ ${BLUE}4. ${YELLOW}🔄 Restart VPN Services${NC}                                      │"
     echo -e "${CYAN}│ ${BLUE}0. ${YELLOW}🚪 Exit${NC}                                                      │"
     echo -e "${CYAN}└────────────────────────────────────────────────────────────────────┘${NC}"
     echo ""
     
-    read -rp "$(echo -e "${YELLOW}▶ Select option [0-3]: ${NC}")" choice
+    read -rp "$(echo -e "${YELLOW}▶ Select option [0-4]: ${NC}")" choice
 
     case "$choice" in
         1)
@@ -93,34 +123,54 @@ while true; do
             expiry_date=$(calculate_expiry "$expiry")
             echo "$user * $pass *" >> "$CHAP_FILE"
             echo "$user $expiry_date" >> "$EXPIRY_FILE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - Created user: $user (Expiry: $expiry_date)" >> "$LOG_FILE"
             echo -e "${GREEN}✔ User $user added. Expiry: $expiry_date${NC}"
             sleep 1
             ;;
         2)
             read -rp "$(echo -e "${BLUE}▶ Enter username to delete: ${NC}")" user
-            sed -i "/^$user /d" "$CHAP_FILE"
-            sed -i "/^$user /d" "$EXPIRY_FILE"
-            echo -e "${GREEN}✔ User $user deleted${NC}"
+            if grep -q "^$user " "$CHAP_FILE"; then
+                sed -i "/^$user /d" "$CHAP_FILE"
+                sed -i "/^$user /d" "$EXPIRY_FILE"
+                echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleted user: $user" >> "$LOG_FILE"
+                echo -e "${GREEN}✔ User $user deleted${NC}"
+            else
+                echo -e "${RED}✖ User $user not found${NC}"
+            fi
             sleep 1
             ;;
         3)
             echo -e "${CYAN}┌──────────────────── USERS ─────────────────────┐"
             printf "%-20s %-20s\n" "Username" "Expiry Date"
             echo "--------------------------------------------------"
-            while read -r line; do
-                uname=$(echo "$line" | cut -d' ' -f1)
-                exp=$(echo "$line" | cut -d' ' -f2)
-                printf "%-20s %-20s\n" "$uname" "$exp"
-            done < "$EXPIRY_FILE"
+            if [ -f "$EXPIRY_FILE" ]; then
+                while read -r line; do
+                    uname=$(echo "$line" | awk '{print $1}')
+                    exp=$(echo "$line" | awk '{print $2}')
+                    if [ "$(date -d "$exp" +%s)" -lt "$(date +%s)" ]; then
+                        printf "${RED}%-20s %-20s (EXPIRED)${NC}\n" "$uname" "$exp"
+                    else
+                        printf "%-20s %-20s\n" "$uname" "$exp"
+                    fi
+                done < "$EXPIRY_FILE"
+            else
+                echo -e "${RED}No users found${NC}"
+            fi
             echo -e "${CYAN}└──────────────────────────────────────────────────┘${NC}"
             read -rp "$(echo -e "${YELLOW}▶ Press Enter to return...${NC}")"
             ;;
+        4)
+            echo -e "${YELLOW}Restarting VPN services...${NC}"
+            systemctl restart accel-ppp xray sshd
+            echo -e "${GREEN}✔ Services restarted successfully${NC}"
+            sleep 2
+            ;;
         0)
-            echo -e "${BLUE}👋 Bye!${NC}"
+            echo -e "${BLUE}👋 Goodbye!${NC}"
             exit 0
             ;;
         *)
-            echo -e "${RED}⚠ Invalid option! Please select between 0-3.${NC}"
+            echo -e "${RED}⚠ Invalid option! Please select between 0-4.${NC}"
             sleep 1
             ;;
     esac
