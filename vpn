@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Modern Colors
+# Warna
 BLUE='\033[0;38;5;27m'
 CYAN='\033[0;38;5;45m'
 GREEN='\033[0;38;5;46m'
@@ -10,28 +10,26 @@ PURPLE='\033[0;38;5;165m'
 ORANGE='\033[0;38;5;208m'
 NC='\033[0m' # No Color
 
-# Get system information
+# System Info
 OS_INFO=$(source /etc/os-release && echo "$PRETTY_NAME")
 PUBLIC_IP=$(curl -s ifconfig.me)
 CITY=$(curl -s ipinfo.io/$PUBLIC_IP | jq -r '.city // "Unknown"')
 DOMAIN=$(hostname -d 2>/dev/null || echo "No domain")
 
-# Text Gradient
+# Gradient Text (tidak diubah)
 gradient() {
     local text=$1
     local length=${#text}
     local output=""
-
     for (( i=0; i<length; i++ )); do
         char=${text:$i:1}
         color_code=$(( 27 + (i * 18 / length) ))
         output+="\033[38;5;${color_code}m${char}"
     done
-
     echo -ne "${output}${NC}"
 }
 
-# Check service status
+# Check Service Status
 check_service() {
     systemctl is-active accel-ppp &> /dev/null
     if [ $? -eq 0 ]; then
@@ -41,12 +39,12 @@ check_service() {
     fi
 }
 
-# Files
+# Path
 CHAP_FILE="/home/sstp/sstp_account"
 EXPIRY_FILE="/home/sstp/account_expiry"
 LOG_FILE="/var/log/vpn_users.log"
 
-# Header with animation
+# Display Header
 display_header() {
     clear
     echo -e "${PURPLE}╔════════════════════════════════════════════════════════════════════╗"
@@ -54,7 +52,7 @@ display_header() {
     echo -e "\n${PURPLE}╚════════════════════════════════════════════════════════════════════╝${NC}"
 }
 
-# Calculate expiry date
+# Calculate expiry
 calculate_expiry() {
     local period=$1
     if [[ $period == *"day"* ]]; then
@@ -67,96 +65,62 @@ calculate_expiry() {
         years=${period%% *}
         date -d "+${years} years" +"%Y-%m-%d"
     else
-        date -d "+30 days" +"%Y-%m-%d"
+        date -d "+1 month" +"%Y-%m-%d"
     fi
 }
 
-# Check if account is expired
-check_expiry() {
-    local user=$1
-    local expiry_date=$(grep "^$user " "$EXPIRY_FILE" | cut -d' ' -f2)
-
-    if [ -z "$expiry_date" ]; then
-        echo -e "${YELLOW}No expiry set${NC}"
-    elif [ $(date -d "$expiry_date" +%s) -lt $(date +%s) ]; then
-        echo -e "${RED}EXPIRED ($expiry_date)${NC}"
-    else
-        echo -e "${GREEN}Active until $expiry_date${NC}"
-    fi
-}
-
-# Display user registration info
-display_user_info() {
-    local user=$1
-    local pass=$2
-    local expiry=$3
-    local ip=$(curl -s ifconfig.me)
-    local date=$(date +"%Y-%m-%d %H:%M:%S")
-    local expiry_date=$(calculate_expiry "$expiry")
-
-    echo "[$date] User created: $user | IP: $ip | Expiry: $expiry_date" >> "$LOG_FILE"
-    echo "$user $expiry_date" >> "$EXPIRY_FILE"
-
-    display_header
-    echo -e "${GREEN}USER: $user\nPASS: $pass\nIP: $ip\nEXPIRES: $expiry_date${NC}"
-    read -p "Press enter to return..."
-}
-
-# Main menu
+# Main Menu
 while true; do
     display_header
-    echo -e "${CYAN}1. Create user\n2. Delete user\n3. List users\n4. Check expiry\n5. Restart service\n0. Exit${NC}"
-    read -p "Choice: " choice
+    echo -e "${CYAN}┌────────────────────────────────────────────────────────────────────┐"
+    echo -e "${CYAN}│ ${YELLOW}📋 MAIN MENU:${NC}                                                         │"
+    echo -e "${CYAN}│                                                                    │"
+    echo -e "${CYAN}│ ${BLUE}1. ${YELLOW}➕ Create new user account${NC}                                     │"
+    echo -e "${CYAN}│ ${BLUE}2. ${YELLOW}➖ Delete user account${NC}                                        │"
+    echo -e "${CYAN}│ ${BLUE}3. ${YELLOW}👥 View all users${NC}                                            │"
+    echo -e "${CYAN}│ ${BLUE}0. ${YELLOW}🚪 Exit${NC}                                                      │"
+    echo -e "${CYAN}└────────────────────────────────────────────────────────────────────┘${NC}"
+    echo ""
+    
+    read -rp "$(echo -e "${YELLOW}▶ Select option [0-3]: ${NC}")" choice
 
-    case $choice in
+    case "$choice" in
         1)
-            read -p "Username: " user
-            read -s -p "Password: " pass
+            read -rp "$(echo -e "${BLUE}▶ Enter username: ${NC}")" user
+            read -rsp "$(echo -e "${BLUE}▶ Enter password: ${NC}")" pass
             echo
-            read -p "Expiry (e.g., '7 days', '1 month'): " expiry
-            echo -e "$user * $pass *" >> "$CHAP_FILE"
-            display_user_info "$user" "$pass" "$expiry"
+            read -rp "$(echo -e "${YELLOW}▶ Expiry (e.g. '7 days', '1 month'): ${NC}")" expiry
+            expiry_date=$(calculate_expiry "$expiry")
+            echo "$user * $pass *" >> "$CHAP_FILE"
+            echo "$user $expiry_date" >> "$EXPIRY_FILE"
+            echo -e "${GREEN}✔ User $user added. Expiry: $expiry_date${NC}"
+            sleep 1
             ;;
         2)
-            read -p "Username to delete: " user
+            read -rp "$(echo -e "${BLUE}▶ Enter username to delete: ${NC}")" user
             sed -i "/^$user /d" "$CHAP_FILE"
             sed -i "/^$user /d" "$EXPIRY_FILE"
-            echo -e "${GREEN}Deleted user $user${NC}"
+            echo -e "${GREEN}✔ User $user deleted${NC}"
             sleep 1
             ;;
         3)
-            echo -e "${CYAN}USER LIST:${NC}"
+            echo -e "${CYAN}┌──────────────────── USERS ─────────────────────┐"
+            printf "%-20s %-20s\n" "Username" "Expiry Date"
+            echo "--------------------------------------------------"
             while read -r line; do
-                user=$(echo "$line" | cut -d' ' -f1)
-                expiry=$(grep "^$user " "$EXPIRY_FILE" | cut -d' ' -f2)
-                status=""
-                if [ -z "$expiry" ]; then
-                    status="No expiry"
-                elif [ $(date -d "$expiry" +%s) -lt $(date +%s) ]; then
-                    status="Expired"
-                else
-                    status="Active"
-                fi
-                echo -e "$user - $expiry - $status"
-            done < "$CHAP_FILE"
-            read -p "Press enter to return..."
-            ;;
-        4)
-            read -p "Username: " user
-            check_expiry "$user"
-            read -p "Press enter to return..."
-            ;;
-        5)
-            systemctl restart accel-ppp
-            echo -e "${GREEN}Service restarted${NC}"
-            sleep 1
+                uname=$(echo "$line" | cut -d' ' -f1)
+                exp=$(echo "$line" | cut -d' ' -f2)
+                printf "%-20s %-20s\n" "$uname" "$exp"
+            done < "$EXPIRY_FILE"
+            echo -e "${CYAN}└──────────────────────────────────────────────────┘${NC}"
+            read -rp "$(echo -e "${YELLOW}▶ Press Enter to return...${NC}")"
             ;;
         0)
-            echo -e "${BLUE}Exiting...${NC}"
+            echo -e "${BLUE}👋 Bye!${NC}"
             exit 0
             ;;
         *)
-            echo -e "${RED}Invalid option${NC}"
+            echo -e "${RED}⚠ Invalid option! Please select between 0-3.${NC}"
             sleep 1
             ;;
     esac
