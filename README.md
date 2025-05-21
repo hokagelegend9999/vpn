@@ -30,7 +30,7 @@ Jalankan satu perintah berikut di server Ubuntu/Debian kamu (akses root diperluk
 
 
 
-1.
+1.UBUNTU 20
 
 
 
@@ -45,6 +45,20 @@ wget https://raw.githubusercontent.com/hokagelegend9999/vpn/refs/heads/main/vpn 
 cd
 ```
 
+2.DEBIAN 11
+
+
+
+```bash
+wget https://raw.githubusercontent.com/hokagelegend9999/vpn/refs/heads/main/debian-installer-sstp.sh && chmod +x debian-installer-sstp.sh && sudo ./debian-installer-sstp.sh
+
+```
+
+```
+cd /usr/local/sbin
+wget https://raw.githubusercontent.com/hokagelegend9999/vpn/refs/heads/main/vpn && sudo chmod +x vpn
+cd
+```
 
 🛠 Cara Menggunakan Menu SSTP
 Setelah instalasi selesai, jalankan:
