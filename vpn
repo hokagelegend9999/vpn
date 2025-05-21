@@ -40,14 +40,46 @@ gradient() {
     echo -ne "${output}${NC}"
 }
 
-# Check Service Status
-check_service() {
-    service_name=$1
-    if systemctl is-active --quiet $service_name; then
-        echo -e "${GREEN}● RUNNING${NC}"
+# Enhanced Service Status Check
+check_vpn_service() {
+    local service_name=$1
+    local port=$2
+    local protocol=$3
+    
+    # Check if service process is running
+    case $service_name in
+        "pptpd")
+            if pgrep pptpd >/dev/null; then
+                status="${GREEN}● RUNNING${NC}"
+            else
+                status="${RED}● STOPPED${NC}"
+            fi
+            ;;
+        "accel-ppp"|"xl2tpd")
+            if systemctl is-active --quiet $service_name 2>/dev/null; then
+                status="${GREEN}● RUNNING${NC}"
+            else
+                status="${RED}● STOPPED${NC}"
+            fi
+            ;;
+        *)
+            status="${RED}● UNKNOWN SERVICE${NC}"
+            ;;
+    esac
+    
+    # Additional port check
+    if [ -n "$port" ]; then
+        if ss -tuln | grep -q ":$port "; then
+            port_status="${GREEN}✓${NC}"
+        else
+            port_status="${RED}✗${NC}"
+            status="${RED}● PORT NOT LISTENING${NC}"
+        fi
     else
-        echo -e "${RED}● STOPPED${NC}"
+        port_status="${YELLOW}?${NC}"
     fi
+    
+    echo -e "$status (Port $port: $port_status)"
 }
 
 # Path
@@ -73,10 +105,10 @@ display_header() {
     echo -e "${CYAN}│ ${YELLOW}💾 RAM Usage   : ${USAGERAM}MB / ${RAM}MB (${MEMOFREE})"
     echo -e "${CYAN}│ ${YELLOW}⚡ CPU Load    : ${LOADCPU} | Cores: ${CORE}"
     echo -e "${CYAN}└──────────────────────────────────────────────────────────────────┘${NC}"
-    echo -e "${CYAN}┌─────────────────────── SERVICE STATUS ──────────────────────────┐"
-    echo -e "${CYAN}│ ${YELLOW}🔌 SSTP Service : $(check_service accel-ppp)"
-    echo -e "${CYAN}│ ${YELLOW}🌐 Xray Service : $(check_service xray)"
-    echo -e "${CYAN}│ ${YELLOW}🛡️ SSH Service  : $(check_service sshd)"
+    echo -e "${CYAN}┌─────────────────────── VPN SERVICE STATUS ───────────────────────┐"
+    echo -e "${CYAN}│ ${YELLOW}🔌 PPTP Service : $(check_vpn_service pptpd 1723 tcp)"
+    echo -e "${CYAN}│ ${YELLOW}🌐 SSTP Service : $(check_vpn_service accel-ppp 443 tcp)"
+    echo -e "${CYAN}│ ${YELLOW}🛡️ L2TP Service : $(check_vpn_service xl2tpd 1701 udp)"
     echo -e "${CYAN}└──────────────────────────────────────────────────────────────────┘${NC}"
     echo ""
 }
@@ -161,8 +193,8 @@ while true; do
             ;;
         4)
             echo -e "${YELLOW}Restarting VPN services...${NC}"
-            systemctl restart accel-ppp xray sshd
-            echo -e "${GREEN}✔ Services restarted successfully${NC}"
+            systemctl restart pptpd accel-ppp xl2tpd
+            echo -e "${GREEN}✔ VPN services restarted successfully${NC}"
             sleep 2
             ;;
         0)
