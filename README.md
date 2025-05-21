@@ -25,20 +25,19 @@ Jalankan satu perintah berikut di server Ubuntu/Debian kamu (akses root diperluk
 
 1.
 
-```
-sudo apt update
-sudo apt install -y libpcre2-dev
-```
+
 
 ```bash
-wget https://raw.githubusercontent.com/hokagelegend9999/vpn/main/installer-sstp.sh && \
-chmod +x installer-sstp.sh && \
-sudo ./installer-sstp.sh
+wget https://raw.githubusercontent.com/hokagelegend9999/vpn/refs/heads/main/installer-sstp.sh && chmod +x installer-sstp.sh && sudo ./installer-sstp.sh
+
 ```
 
 🛠 Cara Menggunakan Menu SSTP
 Setelah instalasi selesai, jalankan:
-sudo sstp
+
+```
+sstp-ui
+```
 Menu interaktif akan muncul, pilih opsi sesuai kebutuhan:
 ========= MENU SSTP USER =========
 1. Buat akun SSTP
