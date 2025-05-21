@@ -1,155 +1,246 @@
 #!/bin/bash
 
-# =============================================
-# HOKAGE VPN Menu Update with SSTP/PPTP Support
-# Version: 5.6 - Fixed Menu Conflicts
-# =============================================
+# ================================================
+# VPN ALL-IN-ONE INSTALLER (PPTP + SSTP + OpenVPN)
+# Version: 3.0
+# Tested on: Ubuntu 20.04/22.04
+# ================================================
 
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
-# Function to update the menu
-update_menu() {
-    # Backup existing menu
-    sudo cp /usr/bin/menu /usr/bin/menu.backup
-    
-    # Find the menu display section and add new options after backup (option 11)
-    sudo sed -i '/echo -e "$COLOR1│ ${WH}\[${COLOR1}05${WH}\]${NC} ${COLOR1}• ${WH}BACKUP/a\
-echo -e "$COLOR1│ ${WH}\[${COLOR1}13${WH}\]${NC} ${COLOR1}• ${WH}SSTP     ${WH}\[${COLOR1}Menu${WH}\]     ${WH}\[${COLOR1}14${WH}\]${NC} ${COLOR1}• ${WH}PPTP     ${WH}\[${COLOR1}Menu${WH}\]$COLOR1 │ $NC"' /usr/bin/menu
+# Check root
+if [ "$(id -u)" -ne 0 ]; then
+  echo -e "${RED}Error: Script must be run as root${NC}"
+  exit 1
+fi
 
-    # Add the case statements for new options (using 13/14 instead of 11/12)
-    sudo sed -i '/case $opt in/a\
-13 | 13) clear ; sstp_management ;;\
-14 | 14) clear ; pptp_management ;;' /usr/bin/menu
+# Header
+echo -e "${BLUE}"
+cat << "EOF"
+   ____   _____ _____   _____   _____ _____ 
+  / __ \ / ____|  __ \ / ____| / ____|  __ \
+ | |  | | (___ | |__) | |  __ | |    | |__) |
+ | |  | |\___ \|  ___/| | |_ || |    |  ___/ 
+ | |__| |____) | |    | |__| || |____| |     
+  \____/|_____/|_|     \_____(_)_____|_|     
+EOF
+echo -e "${NC}"
 
-    # Add the SSTP/PPTP management functions at the end of the file
-    sudo tee -a /usr/bin/menu > /dev/null <<'MENU_EOF'
+# Function to install PPTP
+install_pptp() {
+  echo -e "\n${YELLOW}[1/3] Installing PPTP VPN...${NC}"
+  apt install -y pptpd
+  
+  # Configure PPTP
+  cat > /etc/pptpd.conf << EOL
+option /etc/ppp/pptpd-options
+logwtmp
+localip 192.168.50.1
+remoteip 192.168.50.100-200
+EOL
 
-# SSTP Management
-sstp_management() {
-    while true; do
-        clear
-        echo -e "$COLOR1╭═══════════════════════════════════════════════════╮${NC}"
-        echo -e "$COLOR1│ ${WH}            • SSTP VPN MANAGEMENT •              ${NC} $COLOR1│${NC}"
-        echo -e "$COLOR1╰═══════════════════════════════════════════════════╯${NC}"
-        echo -e "$COLOR1╭═══════════════════════════════════════════════════╮${NC}"
-        echo -e "$COLOR1│ ${WH}[${COLOR1}01${WH}]${NC} ${COLOR1}• ${WH}Create SSTP Account                          $COLOR1│${NC}"
-        echo -e "$COLOR1│ ${WH}[${COLOR1}02${WH}]${NC} ${COLOR1}• ${WH}Delete SSTP Account                          $COLOR1│${NC}"
-        echo -e "$COLOR1│ ${WH}[${COLOR1}03${WH}]${NC} ${COLOR1}• ${WH}List SSTP Accounts                           $COLOR1│${NC}"
-        echo -e "$COLOR1│ ${WH}[${COLOR1}04${WH}]${NC} ${COLOR1}• ${WH}Restart SSTP Service                         $COLOR1│${NC}"
-        echo -e "$COLOR1│ ${WH}[${COLOR1}00${WH}]${NC} ${COLOR1}• ${WH}Back to Main Menu                           $COLOR1│${NC}"
-        echo -e "$COLOR1╰═══════════════════════════════════════════════════╯${NC}"
-        echo -e ""
-        echo -ne " ${WH}Select menu ${COLOR1}: ${WH}"; read sstp_opt
-        
-        case $sstp_opt in
-            01 | 1)
-                read -p "Username: " username
-                read -p "Password: " password
-                echo "$username * $password *" | sudo tee -a /etc/ppp/chap-secrets >/dev/null
-                sudo systemctl restart accel-ppp
-                echo -e "${GREEN}Account created!${NC}"
-                echo -e "Server: $(curl -s ifconfig.me)"
-                echo -e "Port: 4433"
-                echo -e "Username: ${YELLOW}$username${NC}"
-                echo -e "Password: ${YELLOW}$password${NC}"
-                ;;
-            02 | 2)
-                read -p "Username to delete: " deluser
-                sudo sed -i "/^$deluser /d" /etc/ppp/chap-secrets
-                sudo systemctl restart accel-ppp
-                echo -e "${GREEN}Account deleted!${NC}"
-                ;;
-            03 | 3)
-                echo -e "\n${CYAN}» SSTP ACCOUNTS «${NC}"
-                sudo cat /etc/ppp/chap-secrets | awk '{print $1,$3}' | column -t
-                ;;
-            04 | 4)
-                sudo systemctl restart accel-ppp
-                echo -e "${GREEN}SSTP service restarted!${NC}"
-                ;;
-            00 | 0)
-                menu
-                ;;
-            *)
-                echo -e "${RED}Invalid option!${NC}"
-                ;;
-        esac
-        echo -e "\nPress Enter to continue..."
-        read
-    done
+  # Configure PPP options
+  sed -i 's/#ms-dns 10.0.0.1/ms-dns 8.8.8.8/' /etc/ppp/pptpd-options
+  sed -i 's/#ms-dns 10.0.0.2/ms-dns 8.8.4.4/' /etc/ppp/pptpd-options
+
+  # Enable IP forwarding
+  sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
+  sysctl -p
+
+  # Firewall rules
+  iptables -t nat -A POSTROUTING -o $(ip route | grep default | awk '{print $5}') -j MASQUERADE
+  iptables-save > /etc/iptables.rules
+
+  # Add sample user
+  echo "vpnuser pptpd vpnpassword *" >> /etc/ppp/chap-secrets
+
+  systemctl restart pptpd
+  systemctl enable pptpd
 }
 
-# PPTP Management
-pptp_management() {
-    while true; do
-        clear
-        echo -e "$COLOR1╭═══════════════════════════════════════════════════╮${NC}"
-        echo -e "$COLOR1│ ${WH}            • PPTP VPN MANAGEMENT •              ${NC} $COLOR1│${NC}"
-        echo -e "$COLOR1╰═══════════════════════════════════════════════════╯${NC}"
-        echo -e "$COLOR1╭═══════════════════════════════════════════════════╮${NC}"
-        echo -e "$COLOR1│ ${WH}[${COLOR1}01${WH}]${NC} ${COLOR1}• ${WH}Create PPTP Account                           $COLOR1│${NC}"
-        echo -e "$COLOR1│ ${WH}[${COLOR1}02${WH}]${NC} ${COLOR1}• ${WH}Delete PPTP Account                           $COLOR1│${NC}"
-        echo -e "$COLOR1│ ${WH}[${COLOR1}03${WH}]${NC} ${COLOR1}• ${WH}List PPTP Accounts                            $COLOR1│${NC}"
-        echo -e "$COLOR1│ ${WH}[${COLOR1}04${WH}]${NC} ${COLOR1}• ${WH}Restart PPTP Service                          $COLOR1│${NC}"
-        echo -e "$COLOR1│ ${WH}[${COLOR1}00${WH}]${NC} ${COLOR1}• ${WH}Back to Main Menu                            $COLOR1│${NC}"
-        echo -e "$COLOR1╰═══════════════════════════════════════════════════╯${NC}"
-        echo -e ""
-        echo -ne " ${WH}Select menu ${COLOR1}: ${WH}"; read pptp_opt
-        
-        case $pptp_opt in
-            01 | 1)
-                read -p "Username: " username
-                read -p "Password: " password
-                echo "$username * $password *" | sudo tee -a /etc/ppp/chap-secrets >/dev/null
-                sudo systemctl restart accel-ppp
-                echo -e "${GREEN}Account created!${NC}"
-                echo -e "Server: $(curl -s ifconfig.me)"
-                echo -e "Port: 1723"
-                echo -e "Username: ${YELLOW}$username${NC}"
-                echo -e "Password: ${YELLOW}$password${NC}"
-                ;;
-            02 | 2)
-                read -p "Username to delete: " deluser
-                sudo sed -i "/^$deluser /d" /etc/ppp/chap-secrets
-                sudo systemctl restart accel-ppp
-                echo -e "${GREEN}Account deleted!${NC}"
-                ;;
-            03 | 3)
-                echo -e "\n${CYAN}» PPTP ACCOUNTS «${NC}"
-                sudo cat /etc/ppp/chap-secrets | awk '{print $1,$3}' | column -t
-                ;;
-            04 | 4)
-                sudo systemctl restart accel-ppp
-                echo -e "${GREEN}PPTP service restarted!${NC}"
-                ;;
-            00 | 0)
-                menu
-                ;;
-            *)
-                echo -e "${RED}Invalid option!${NC}"
-                ;;
-        esac
-        echo -e "\nPress Enter to continue..."
-        read
-    done
-}
-MENU_EOF
+# Function to install SSTP
+install_sstp() {
+  echo -e "\n${YELLOW}[2/3] Installing SSTP VPN...${NC}"
+  
+  # Install dependencies
+  apt install -y build-essential cmake libssl-dev libpcre3-dev
+  
+  # Install accel-ppp
+  cd /usr/src
+  git clone https://github.com/accel-ppp/accel-ppp.git
+  cd accel-ppp
+  mkdir build && cd build
+  cmake -DCMAKE_INSTALL_PREFIX=/usr -DKDIR=/usr/src/linux-headers-$(uname -r) ..
+  make -j$(nproc)
+  make install
 
-    echo -e "${GREEN}[✓] Menu updated with SSTP/PPTP options!${NC}"
+  # Generate SSL certs
+  mkdir -p /etc/ssl/{private,certs}
+  openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+    -keyout /etc/ssl/private/sstp.key \
+    -out /etc/ssl/certs/sstp.crt \
+    -subj "/CN=sstp-server"
+
+  # Create config
+  cat > /etc/accel-ppp.conf << EOL
+[modules]
+log-file
+ppp
+sstp
+auth-chap
+
+[core]
+log-error=/var/log/accel-ppp/error.log
+log-debug=/var/log/accel-ppp/debug.log
+
+[ppp]
+verbose=1
+mtu=1400
+mru=1400
+
+[sstp]
+bind=0.0.0.0:4443
+ssl-key=/etc/ssl/private/sstp.key
+ssl-cert=/etc/ssl/certs/sstp.crt
+
+[auth-chap]
+chap-secrets=/etc/ppp/chap-secrets
+
+[ip-pool]
+gw-ip=192.168.60.1
+pool-start=192.168.60.100
+pool-end=192.168.60.200
+EOL
+
+  # Create systemd service
+  cat > /etc/systemd/system/accel-ppp.service << EOL
+[Unit]
+Description=Accel-PPP Server
+After=network.target
+
+[Service]
+Type=forking
+ExecStart=/usr/sbin/accel-pppd -c /etc/accel-ppp.conf
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+  systemctl daemon-reload
+  systemctl start accel-ppp
+  systemctl enable accel-ppp
 }
 
-# Main execution
-show_banner
-update_menu
-echo -e "\n${GREEN}Update completed successfully!${NC}"
-echo -e "New menu options:"
-echo -e "  ${YELLOW}13${NC} - SSTP Management"
-echo -e "  ${YELLOW}14${NC} - PPTP Management"
-echo -e "\nUse ${YELLOW}menu${NC} to access the updated interface"
+# Function to install OpenVPN
+install_openvpn() {
+  echo -e "\n${YELLOW}[3/3] Installing OpenVPN...${NC}"
+  
+  apt install -y openvpn easy-rsa
+  
+  # Setup CA
+  make-cadir ~/openvpn-ca
+  cd ~/openvpn-ca
+  
+  # Configure vars
+  sed -i 's/KEY_NAME="EasyRSA"/KEY_NAME="server"/' vars
+  sed -i 's/KEY_COUNTRY="US"/KEY_COUNTRY="ID"/' vars
+  sed -i 's/KEY_PROVINCE="CA"/KEY_PROVINCE="JAVA"/' vars
+  sed -i 's/KEY_CITY="SanFrancisco"/KEY_CITY="Jakarta"/' vars
+  sed -i 's/KEY_ORG="Copyleft"/KEY_ORG="MyVPN"/' vars
+  sed -i 's/KEY_EMAIL="me@example.com"/KEY_EMAIL="admin@example.com"/' vars
+  sed -i 's/KEY_OU="MyOrganizationalUnit"/KEY_OU="IT"/' vars
+  
+  # Build CA and server certs
+  source vars
+  ./clean-all
+  ./build-ca --batch
+  ./build-key-server --batch server
+  ./build-dh
+  openvpn --genkey --secret keys/ta.key
+  
+  # Install certs
+  cd ~/openvpn-ca/keys
+  cp server.crt server.key ca.crt dh2048.pem ta.key /etc/openvpn/
+  
+  # Configure server
+  gunzip -c /usr/share/doc/openvpn/examples/sample-config-files/server.conf.gz > /etc/openvpn/server.conf
+  
+  # Modify config
+  sed -i 's/;push "redirect-gateway def1 bypass-dhcp"/push "redirect-gateway def1 bypass-dhcp"/' /etc/openvpn/server.conf
+  sed -i 's/;push "dhcp-option DNS 208.67.222.222"/push "dhcp-option DNS 8.8.8.8"\npush "dhcp-option DNS 8.8.4.4"/' /etc/openvpn/server.conf
+  sed -i 's/;user nobody/user nobody/' /etc/openvpn/server.conf
+  sed -i 's/;group nogroup/group nogroup/' /etc/openvpn/server.conf
+  echo -e "\n# Additional config\nkeepalive 10 120\ncomp-lzo no\npersist-key\npersist-tun" >> /etc/openvpn/server.conf
+  
+  # Enable IP forwarding
+  sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
+  sysctl -p
+  
+  # Firewall rules
+  iptables -t nat -A POSTROUTING -o $(ip route | grep default | awk '{print $5}') -j MASQUERADE
+  iptables-save > /etc/iptables.rules
+  
+  systemctl start openvpn@server
+  systemctl enable openvpn@server
+  
+  # Generate client config
+  mkdir -p ~/client-configs/files
+  cat > ~/client-configs/base.conf << EOL
+client
+dev tun
+proto udp
+remote $(curl -s ifconfig.me) 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+remote-cert-tls server
+cipher AES-256-CBC
+comp-lzo no
+verb 3
+EOL
+}
+
+# Main installation
+main() {
+  # Update system
+  echo -e "${YELLOW}[+] Updating system packages...${NC}"
+  apt update -y && apt upgrade -y
+  
+  # Install all VPN services
+  install_pptp
+  install_sstp
+  install_openvpn
+  
+  # Final touches
+  echo -e "\n${GREEN}[+] Installation complete!${NC}"
+  echo -e "\n${BLUE}=== VPN Configuration Summary ===${NC}"
+  echo -e "PPTP:"
+  echo -e "  Port: 1723/tcp"
+  echo -e "  Users: /etc/ppp/chap-secrets"
+  echo -e "  Test: sudo pptpd -f"
+  
+  echo -e "\nSSTP:"
+  echo -e "  Port: 4443/tcp"
+  echo -e "  Config: /etc/accel-ppp.conf"
+  echo -e "  Logs: /var/log/accel-ppp/"
+  
+  echo -e "\nOpenVPN:"
+  echo -e "  Port: 1194/udp"
+  echo -e "  Config: /etc/openvpn/server.conf"
+  echo -e "  Client config: ~/client-configs/"
+  
+  echo -e "\n${GREEN}To manage users:"
+  echo -e "  PPTP/SSTP: Edit /etc/ppp/chap-secrets"
+  echo -e "  OpenVPN: Generate client configs in ~/client-configs/${NC}"
+}
+
+# Execute
+main
