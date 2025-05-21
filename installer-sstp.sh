@@ -2,7 +2,7 @@
 
 # =============================================
 # HOKAGE VPN Installer - Ultimate Ninja Edition
-# Version: 5.3 - With SSTP/PPTP Support
+# Version: 5.4 - Fixed SSTP/PPTP Support
 # =============================================
 
 # Colors
@@ -59,7 +59,8 @@ install_accel() {
     git checkout 1.12.0
     mkdir build && cd build
     cmake -DCMAKE_INSTALL_PREFIX=/usr \
-          -DRADIUS=FALSE -DBUILD_DRIVER=FALSE ..
+          -DRADIUS=FALSE -DBUILD_DRIVER=FALSE \
+          -DKDIR=/usr/src/linux-headers-$(uname -r) ..
     make -j$(nproc) && sudo make install
     echo -e "${GREEN}[✓] Techniques mastered!${NC}"
     sleep 2
@@ -81,11 +82,14 @@ auth-chap
 [core]
 log-error=/var/log/accel-ppp/error.log
 log-debug=/var/log/accel-ppp/debug.log
+thread-count=4
 
 [ppp]
 verbose=1
 mtu=1400
 mru=1400
+min-mtu=1280
+min-mru=1280
 
 [sstp]
 bind=0.0.0.0:4433
@@ -108,13 +112,16 @@ ACCEL_EOF
 [Unit]
 Description=HOKAGE VPN Server
 After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
-Type=forking
+Type=simple
 ExecStart=/usr/sbin/accel-pppd -c /etc/accel-ppp.conf -p /run/accel-pppd.pid
 PIDFile=/run/accel-pppd.pid
 Restart=on-failure
-TimeoutStartSec=60s
+RestartSec=5s
+TimeoutStartSec=30
 Environment="ACCEL_PPP_DEBUG=99"
 
 [Install]
@@ -143,7 +150,7 @@ update_menu() {
     # Backup existing menu
     sudo cp /usr/bin/menu /usr/bin/menu.backup
     
-    # Add SSTP/PPTP options to the menu
+    # Add SSTP/PPTP management functions
     sudo tee -a /usr/bin/menu > /dev/null <<'MENU_EOF'
 
 # SSTP/PPTP Management
@@ -236,14 +243,14 @@ pptp_management() {
 }
 MENU_EOF
 
-    # Update main menu options
+    # Update main menu options (preserving existing options)
     sudo sed -i '/LIST MENU/a\
-[11] SSTP [Menu] [12] PPTP [Menu]' /usr/bin/menu
+[13] SSTP [Menu] [14] PPTP [Menu]' /usr/bin/menu
 
     # Add case options for new services
     sudo sed -i '/case \$choi in/a\
-        11) sstp_management ;;\
-        12) pptp_management ;;' /usr/bin/menu
+        13) sstp_management ;;\
+        14) pptp_management ;;' /usr/bin/menu
 
     echo -e "${GREEN}[✓] Menu updated with SSTP/PPTP options!${NC}"
     sleep 2
@@ -261,18 +268,28 @@ post_install() {
     sudo ufw allow 1723/tcp  # PPTP
     sudo ufw allow 4433/tcp  # SSTP
     
+    # Fix permissions
+    sudo chmod 755 /usr/sbin/accel-pppd
+    
+    # Load kernel modules
+    sudo modprobe ppp_mppe
+    sudo modprobe ppp_generic
+    sudo modprobe pppox
+    
     # Verify service status
     sudo systemctl daemon-reload
     sudo systemctl enable --now accel-ppp
     
+    # Check service status
     if systemctl is-active --quiet accel-ppp; then
         echo -e "${GREEN}[✓] HOKAGE VPN is active${NC}"
         echo -e "SSTP Port: 4433"
         echo -e "PPTP Port: 1723"
     else
-        echo -e "${RED}[!] VPN service not running!${NC}"
-        echo -e "${YELLOW}Trying to start...${NC}"
-        sudo systemctl start accel-ppp
+        echo -e "${RED}[!] VPN service failed to start!${NC}"
+        echo -e "${YELLOW}Checking logs...${NC}"
+        journalctl -u accel-ppp -n 20 --no-pager
+        exit 1
     fi
     
     sleep 2
