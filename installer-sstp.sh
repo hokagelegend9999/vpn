@@ -2,7 +2,7 @@
 
 # =============================================
 # HOKAGE VPN Menu Update with SSTP/PPTP Support
-# Version: 5.5 - Menu Integration Fix
+# Version: 5.6 - Fixed Menu Conflicts
 # =============================================
 
 # Colors
@@ -19,14 +19,14 @@ update_menu() {
     # Backup existing menu
     sudo cp /usr/bin/menu /usr/bin/menu.backup
     
-    # Find the menu display section and add new options
+    # Find the menu display section and add new options after backup (option 11)
     sudo sed -i '/echo -e "$COLOR1│ ${WH}\[${COLOR1}05${WH}\]${NC} ${COLOR1}• ${WH}BACKUP/a\
-echo -e "$COLOR1│ ${WH}\[${COLOR1}11${WH}\]${NC} ${COLOR1}• ${WH}SSTP     ${WH}\[${COLOR1}Menu${WH}\]     ${WH}\[${COLOR1}12${WH}\]${NC} ${COLOR1}• ${WH}PPTP     ${WH}\[${COLOR1}Menu${WH}\]$COLOR1 │ $NC"' /usr/bin/menu
+echo -e "$COLOR1│ ${WH}\[${COLOR1}13${WH}\]${NC} ${COLOR1}• ${WH}SSTP     ${WH}\[${COLOR1}Menu${WH}\]     ${WH}\[${COLOR1}14${WH}\]${NC} ${COLOR1}• ${WH}PPTP     ${WH}\[${COLOR1}Menu${WH}\]$COLOR1 │ $NC"' /usr/bin/menu
 
-    # Add the case statements for new options
+    # Add the case statements for new options (using 13/14 instead of 11/12)
     sudo sed -i '/case $opt in/a\
-11 | 11) clear ; sstp_management ;;\
-12 | 12) clear ; pptp_management ;;' /usr/bin/menu
+13 | 13) clear ; sstp_management ;;\
+14 | 14) clear ; pptp_management ;;' /usr/bin/menu
 
     # Add the SSTP/PPTP management functions at the end of the file
     sudo tee -a /usr/bin/menu > /dev/null <<'MENU_EOF'
@@ -150,6 +150,6 @@ show_banner
 update_menu
 echo -e "\n${GREEN}Update completed successfully!${NC}"
 echo -e "New menu options:"
-echo -e "  ${YELLOW}11${NC} - SSTP Management"
-echo -e "  ${YELLOW}12${NC} - PPTP Management"
+echo -e "  ${YELLOW}13${NC} - SSTP Management"
+echo -e "  ${YELLOW}14${NC} - PPTP Management"
 echo -e "\nUse ${YELLOW}menu${NC} to access the updated interface"
