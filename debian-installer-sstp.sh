@@ -2,7 +2,17 @@
 set -e
 
 echo "[+] Update & install dependencies..."
-apt update && apt install -y accel-ppp accel-ppp-l2tp accel-ppp-ipoe accel-ppp-pptp accel-ppp-tools openssl
+apt update && apt install -y build-essential cmake libssl-dev libpcre3-dev git openssl
+
+echo "[+] Mengunduh dan mengkompilasi accel-ppp dari sumber..."
+cd /usr/src
+git clone https://github.com/accel-ppp/accel-ppp.git
+cd accel-ppp
+mkdir build
+cd build
+cmake -DCMAKE_INSTALL_PREFIX=/usr -DKDIR=/usr/src/linux-headers-$(uname -r) ..
+make
+make install
 
 echo "[+] Membuat direktori konfigurasi dan log..."
 mkdir -p /etc/ssl/sstp /var/log/accel-ppp /etc/ppp
@@ -94,7 +104,6 @@ echo "[+] Membuat systemd service..."
 cat <<EOF > /etc/systemd/system/accel-ppp.service
 [Unit]
 Description=Accel-PPP Server
-Documentation=man:accel-pppd(8)
 After=network.target
 
 [Service]
