@@ -41,11 +41,18 @@ cleanup() {
 install_deps() {
     show_banner
     echo -e "\n${CYAN}» Installing ninja tools...${NC}"
-    sudo apt update -y && sudo apt install -y \
+    if ! sudo apt update -y; then
+        echo -e "${RED}[!] Failed to update package lists${NC}"
+        exit 1
+    fi
+    if ! sudo apt install -y \
         build-essential cmake git libssl-dev \
         libpcre3-dev liblua5.1-0-dev libnl-3-dev \
         libnl-genl-3-dev pkg-config iproute2 curl openssl \
-        pptp-linux net-tools
+        pptp-linux net-tools; then
+        echo -e "${RED}[!] Failed to install dependencies${NC}"
+        exit 1
+    fi
     echo -e "${GREEN}[✓] Tools ready!${NC}"
     sleep 2
 }
@@ -53,14 +60,14 @@ install_deps() {
 install_accel() {
     show_banner
     echo -e "\n${CYAN}» Compiling shadow techniques...${NC}"
-    cd /usr/src
-    sudo git clone https://github.com/accel-ppp/accel-ppp.git
-    cd accel-ppp
+    cd /usr/src || { echo -e "${RED}Failed to enter /usr/src${NC}"; exit 1; }
+    sudo git clone https://github.com/accel-ppp/accel-ppp.git || { echo -e "${RED}Failed to clone accel-ppp${NC}"; exit 1; }
+    cd accel-ppp || { echo -e "${RED}Failed to enter accel-ppp directory${NC}"; exit 1; }
     git checkout 1.12.0
-    mkdir build && cd build
+    mkdir build && cd build || { echo -e "${RED}Failed to create build directory${NC}"; exit 1; }
     cmake -DCMAKE_INSTALL_PREFIX=/usr \
-          -DRADIUS=FALSE -DBUILD_DRIVER=FALSE ..
-    make -j$(nproc) && sudo make install
+          -DRADIUS=FALSE -DBUILD_DRIVER=FALSE .. || { echo -e "${RED}CMake failed${NC}"; exit 1; }
+    make -j$(nproc) && sudo make install || { echo -e "${RED}Make failed${NC}"; exit 1; }
     echo -e "${GREEN}[✓] Techniques mastered!${NC}"
     sleep 2
 }
@@ -125,7 +132,7 @@ SERVICE_EOF
     sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
         -keyout /etc/ssl/private/ssl.key \
         -out /etc/ssl/certs/ssl.crt \
-        -subj "/CN=hokage-server"
+        -subj "/CN=hokage-server" || { echo -e "${RED}SSL certificate generation failed${NC}"; exit 1; }
     sudo chmod 600 /etc/ssl/private/ssl.key
     
     # Initialize chap-secrets file
@@ -143,10 +150,16 @@ update_menu() {
     # Backup existing menu
     sudo cp /usr/bin/menu /usr/bin/menu.backup
     
-    # Add SSTP/PPTP options to the menu
+    # First, find and remove any existing SSTP/PPTP additions
+    sudo sed -i '/sstp_management()/,/^}/d' /usr/bin/menu
+    sudo sed -i '/pptp_management()/,/^}/d' /usr/bin/menu
+    sudo sed -i '/\[15\] SSTP \[Menu\] \[16\] PPTP \[Menu\]/d' /usr/bin/menu
+    sudo sed -i '/15) sstp_management ;;/d' /usr/bin/menu
+    sudo sed -i '/16) pptp_management ;;/d' /usr/bin/menu
+    
+    # Add the new functions at the end of the file
     sudo tee -a /usr/bin/menu > /dev/null <<'MENU_EOF'
 
-# SSTP/PPTP Management
 sstp_management() {
     echo -e "\n${CYAN}» SSTP MANAGEMENT «${NC}"
     echo "1. Create SSTP Account"
@@ -236,14 +249,11 @@ pptp_management() {
 }
 MENU_EOF
 
-    # Update main menu options
-    sudo sed -i '/LIST MENU/a\
-[15] SSTP [Menu] [16] PPTP [Menu]' /usr/bin/menu
+    # Update the menu options display
+    sudo sed -i '/^echo\s*".*Menu Options.*"/a\    echo "    [15] SSTP [Menu] [16] PPTP [Menu]"' /usr/bin/menu
 
-    # Add case options for new services
-    sudo sed -i '/case \$choi in/a\
-        15) sstp_management ;;\
-        16) pptp_management ;;' /usr/bin/menu
+    # Update the case statement
+    sudo sed -i '/^case\s*\$choi\s*in/a\        15) sstp_management ;;\n        16) pptp_management ;;' /usr/bin/menu
 
     echo -e "${GREEN}[✓] Menu updated with SSTP/PPTP options!${NC}"
     sleep 2
@@ -261,7 +271,15 @@ post_install() {
     sudo ufw allow 1723/tcp  # PPTP
     sudo ufw allow 4433/tcp  # SSTP
     
-    # Verify service status
+    # Fix OpenVPN service if it exists
+    if [ -f /etc/openvpn/server.conf ]; then
+        echo -e "${YELLOW}[!] Fixing OpenVPN configuration...${NC}"
+        sudo systemctl stop openvpn@server
+        sudo sed -i 's/^explicit-exit-notify/#explicit-exit-notify/' /etc/openvpn/server.conf
+        sudo systemctl start openvpn@server
+    fi
+    
+    # Verify accel-ppp service status
     sudo systemctl daemon-reload
     sudo systemctl enable --now accel-ppp
     
@@ -271,8 +289,10 @@ post_install() {
         echo -e "PPTP Port: 1723"
     else
         echo -e "${RED}[!] VPN service not running!${NC}"
-        echo -e "${YELLOW}Trying to start...${NC}"
-        sudo systemctl start accel-ppp
+        echo -e "${YELLOW}Checking logs...${NC}"
+        sudo journalctl -u accel-ppp -n 30 --no-pager
+        echo -e "${YELLOW}Trying to start manually...${NC}"
+        sudo /usr/sbin/accel-pppd -c /etc/accel-ppp.conf -p /run/accel-pppd.pid
     fi
     
     sleep 2
