@@ -34,7 +34,7 @@ wget https://raw.githubusercontent.com/hokagelegend9999/vpn/refs/heads/main/inst
 
 ```
 cd /usr/bin/
-wget https://raw.githubusercontent.com/hokagelegend9999/vpn/refs/heads/main/vpn && sudo chmod +x /usr/local/bin/vpn
+wget https://raw.githubusercontent.com/hokagelegend9999/vpn/refs/heads/main/vpn && sudo chmod +x vpn
 cd
 ```
 
@@ -43,7 +43,7 @@ cd
 Setelah instalasi selesai, jalankan:
 
 ```
-sstp-ui
+vpn
 ```
 Menu interaktif akan muncul, pilih opsi sesuai kebutuhan:
 ========= MENU SSTP USER =========
