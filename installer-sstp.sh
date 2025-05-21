@@ -2,7 +2,7 @@
 
 # =============================================
 # HOKAGE VPN Installer - Ultimate Ninja Edition
-# Version: 5.2 - Complete Ready-to-Use Package
+# Version: 5.3 - With SSTP/PPTP Support
 # =============================================
 
 # Colors
@@ -44,7 +44,8 @@ install_deps() {
     sudo apt update -y && sudo apt install -y \
         build-essential cmake git libssl-dev \
         libpcre3-dev liblua5.1-0-dev libnl-3-dev \
-        libnl-genl-3-dev pkg-config iproute2 curl openssl
+        libnl-genl-3-dev pkg-config iproute2 curl openssl \
+        pptp-linux net-tools
     echo -e "${GREEN}[✓] Tools ready!${NC}"
     sleep 2
 }
@@ -74,6 +75,7 @@ configure_service() {
 [modules]
 ppp
 sstp
+pptp
 auth-chap
 
 [core]
@@ -89,6 +91,9 @@ mru=1400
 bind=0.0.0.0:4433
 ssl-key=/etc/ssl/private/ssl.key
 ssl-cert=/etc/ssl/certs/ssl.crt
+
+[pptp]
+bind=0.0.0.0:1723
 
 [auth-chap]
 chap-secrets=/etc/ppp/chap-secrets
@@ -123,111 +128,124 @@ SERVICE_EOF
         -subj "/CN=hokage-server"
     sudo chmod 600 /etc/ssl/private/ssl.key
     
+    # Initialize chap-secrets file
+    sudo touch /etc/ppp/chap-secrets
+    sudo chmod 600 /etc/ppp/chap-secrets
+    
     echo -e "${GREEN}[✓] Scrolls encrypted!${NC}"
     sleep 2
 }
 
-create_ui() {
+update_menu() {
     show_banner
-    echo -e "\n${CYAN}» Creating ninja interface...${NC}"
+    echo -e "\n${CYAN}» Updating ninja menu...${NC}"
     
-    sudo tee /usr/local/bin/hokage > /dev/null <<'UI_EOF'
-#!/bin/bash
+    # Backup existing menu
+    sudo cp /usr/bin/menu /usr/bin/menu.backup
+    
+    # Add SSTP/PPTP options to the menu
+    sudo tee -a /usr/bin/menu > /dev/null <<'MENU_EOF'
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-show_banner() {
-    clear
-    echo -e "${PURPLE}"
-    echo " _    ____  _  ______  __________  "
-    echo "/ \  /  _ \/ |/ /  _ \/  __/  __/  "
-    echo "| |_|| / \||   /| / \|| |  |  \    "
-    echo "| | || \_/||   \| |-||| |_//  /_   "
-    echo "\_/ \\____/\_|\_\_/ \|\____\____\  "
-    echo -e "${NC}"
-    echo -e "${BLUE}» NINJA VPN CONTROL PANEL «${NC}"
-    echo -e "Status: $([ -f /run/accel-pppd.pid ] && echo -e "${GREEN}● ACTIVE${NC}" || echo -e "${RED}● INACTIVE${NC}")"
-    echo -e "${YELLOW}$(date '+%A, %d %B %Y %H:%M:%S')${NC}"
-    echo -e "${CYAN}══════════════════════════════${NC}"
-}
-
-while true; do
-    show_banner
+# SSTP/PPTP Management
+sstp_management() {
+    echo -e "\n${CYAN}» SSTP MANAGEMENT «${NC}"
+    echo "1. Create SSTP Account"
+    echo "2. Delete SSTP Account"
+    echo "3. List SSTP Accounts"
+    echo "4. Restart SSTP Service"
+    echo -e "${RED}0. Back to Main Menu${NC}"
     
-    echo -e "${GREEN}"
-    echo "1. Create New Shadow Warrior"
-    echo "2. List All Warriors"
-    echo "3. Remove Warrior"
-    echo -e "${YELLOW}"
-    echo "4. Activate/Recharge Technique"
-    echo "5. Deactivate Technique"
-    echo -e "${BLUE}"
-    echo "6. View Battle Logs"
-    echo -e "${RED}"
-    echo "0. Exit Shadow Realm"
-    echo -e "${CYAN}"
-    echo "══════════════════════════════"
-    echo -e "${NC}"
-    
-    read -p "Select jutsu [0-6]: " choice
-    
-    case $choice in
+    read -p "Choose option: " sstp_opt
+    case $sstp_opt in
         1)
-            read -p "Warrior Name: " user
-            read -p "Secret Code: " pass
-            echo "$user * $pass *" | sudo tee -a /etc/ppp/chap-secrets >/dev/null
+            read -p "Username: " username
+            read -p "Password: " password
+            echo "$username * $password *" | sudo tee -a /etc/ppp/chap-secrets >/dev/null
             sudo systemctl restart accel-ppp
-            echo -e "\n${GREEN}»» WARRIOR INITIATED ««${NC}"
-            echo -e "Fortress: $(curl -s ifconfig.me)"
-            echo -e "Gate: 4433"
-            echo -e "Name: ${YELLOW}$user${NC}"
-            echo -e "Code: ${YELLOW}$pass${NC}"
+            echo -e "${GREEN}Account created!${NC}"
+            echo -e "Server: $(curl -s ifconfig.me)"
+            echo -e "Port: 4433"
+            echo -e "Username: ${YELLOW}$username${NC}"
+            echo -e "Password: ${YELLOW}$password${NC}"
             ;;
         2)
-            echo -e "\n${BLUE}» SHADOW WARRIOR ROSTER «${NC}"
-            sudo cat /etc/ppp/chap-secrets | awk '{print $1,$3}' | column -t
-            ;;
-        3)
-            read -p "Warrior to eliminate: " deluser
+            read -p "Username to delete: " deluser
             sudo sed -i "/^$deluser /d" /etc/ppp/chap-secrets
             sudo systemctl restart accel-ppp
-            echo -e "${GREEN}Warrior $deluser vanished!${NC}"
+            echo -e "${GREEN}Account deleted!${NC}"
+            ;;
+        3)
+            echo -e "\n${CYAN}» SSTP ACCOUNTS «${NC}"
+            sudo cat /etc/ppp/chap-secrets | awk '{print $1,$3}' | column -t
             ;;
         4)
             sudo systemctl restart accel-ppp
-            sleep 2
-            echo -e "${YELLOW}Ninja technique recharged!${NC}"
-            ;;
-        5)
-            sudo systemctl stop accel-ppp
-            echo -e "${RED}Technique suspended...${NC}"
-            ;;
-        6)
-            echo -e "\n${BLUE}» BATTLE CHRONICLES «${NC}"
-            sudo tail -20 /var/log/accel-ppp/error.log | sed 's/error/Ninja Alert/g'
+            echo -e "${GREEN}SSTP service restarted!${NC}"
             ;;
         0)
-            echo -e "${BLUE}Vanishing into the mist...${NC}"
-            exit 0
+            return
             ;;
         *)
-            echo -e "${RED}Invalid jutsu!${NC}"
+            echo -e "${RED}Invalid option!${NC}"
             ;;
     esac
-    
-    read -p "Press Enter to continue..."
-done
-UI_EOF
+}
 
-    sudo chmod +x /usr/local/bin/hokage
-    echo -e "${GREEN}[✓] Ninja interface ready!${NC}"
+pptp_management() {
+    echo -e "\n${CYAN}» PPTP MANAGEMENT «${NC}"
+    echo "1. Create PPTP Account"
+    echo "2. Delete PPTP Account"
+    echo "3. List PPTP Accounts"
+    echo "4. Restart PPTP Service"
+    echo -e "${RED}0. Back to Main Menu${NC}"
+    
+    read -p "Choose option: " pptp_opt
+    case $pptp_opt in
+        1)
+            read -p "Username: " username
+            read -p "Password: " password
+            echo "$username * $password *" | sudo tee -a /etc/ppp/chap-secrets >/dev/null
+            sudo systemctl restart accel-ppp
+            echo -e "${GREEN}Account created!${NC}"
+            echo -e "Server: $(curl -s ifconfig.me)"
+            echo -e "Port: 1723"
+            echo -e "Username: ${YELLOW}$username${NC}"
+            echo -e "Password: ${YELLOW}$password${NC}"
+            ;;
+        2)
+            read -p "Username to delete: " deluser
+            sudo sed -i "/^$deluser /d" /etc/ppp/chap-secrets
+            sudo systemctl restart accel-ppp
+            echo -e "${GREEN}Account deleted!${NC}"
+            ;;
+        3)
+            echo -e "\n${CYAN}» PPTP ACCOUNTS «${NC}"
+            sudo cat /etc/ppp/chap-secrets | awk '{print $1,$3}' | column -t
+            ;;
+        4)
+            sudo systemctl restart accel-ppp
+            echo -e "${GREEN}PPTP service restarted!${NC}"
+            ;;
+        0)
+            return
+            ;;
+        *)
+            echo -e "${RED}Invalid option!${NC}"
+            ;;
+    esac
+}
+MENU_EOF
+
+    # Update main menu options
+    sudo sed -i '/LIST MENU/a\
+[15] SSTP [Menu] [16] PPTP [Menu]' /usr/bin/menu
+
+    # Add case options for new services
+    sudo sed -i '/case \$choi in/a\
+        15) sstp_management ;;\
+        16) pptp_management ;;' /usr/bin/menu
+
+    echo -e "${GREEN}[✓] Menu updated with SSTP/PPTP options!${NC}"
     sleep 2
 }
 
@@ -235,19 +253,22 @@ post_install() {
     show_banner
     echo -e "\n${CYAN}» Finalizing ninja deployment...${NC}"
     
-    # Backup existing cron
-    sudo crontab -l > ~/cron_backup.txt 2>/dev/null
-    echo -e "${YELLOW}[!] Cron backup saved to ~/cron_backup.txt${NC}"
-    
-    # Ensure tendang cron job exists
-    if ! crontab -l | grep -q "/usr/bin/tendang"; then
-        echo -e "${YELLOW}[!] Restoring tendang technique...${NC}"
-        (crontab -l 2>/dev/null; echo "*/5 * * * * /usr/bin/tendang") | crontab -
-    fi
+    # Enable IP forwarding
+    sudo sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
+    sudo sysctl -p
+
+    # Firewall rules
+    sudo ufw allow 1723/tcp  # PPTP
+    sudo ufw allow 4433/tcp  # SSTP
     
     # Verify service status
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now accel-ppp
+    
     if systemctl is-active --quiet accel-ppp; then
         echo -e "${GREEN}[✓] HOKAGE VPN is active${NC}"
+        echo -e "SSTP Port: 4433"
+        echo -e "PPTP Port: 1723"
     else
         echo -e "${RED}[!] VPN service not running!${NC}"
         echo -e "${YELLOW}Trying to start...${NC}"
@@ -270,27 +291,22 @@ main() {
     install_deps
     install_accel
     configure_service
-    create_ui
+    update_menu
     post_install
-    
-    sudo systemctl daemon-reload
-    sudo systemctl enable --now accel-ppp
     
     show_banner
     echo -e "${GREEN}"
     echo "══════════════════════════════"
     echo " NINJA VPN READY FOR DEPLOYMENT"
     echo ""
-    echo " To access the shadow panel:"
+    echo " New Features Added:"
+    echo " - SSTP VPN (port 4433)"
+    echo " - PPTP VPN (port 1723)"
     echo ""
-    echo "    ${YELLOW}sudo hokage${GREEN}"
+    echo " Access via main menu:"
+    echo "    ${YELLOW}menu${GREEN}"
     echo ""
-    echo " Compatible with:"
-    echo " - Your tendang technique"
-    echo " - HOKAGE VPN (port 4433)"
-    echo ""
-    echo " Fortress: ${CYAN}$(curl -s ifconfig.me)${GREEN}"
-    echo " Secret Gate: ${CYAN}4433${GREEN}"
+    echo " Server IP: ${CYAN}$(curl -s ifconfig.me)${GREEN}"
     echo "══════════════════════════════"
     echo -e "${NC}"
 }
