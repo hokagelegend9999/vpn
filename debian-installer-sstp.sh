@@ -1,39 +1,42 @@
 #!/bin/bash
 set -e
 
-echo "[+] Update & install dependencies..."
-apt update && apt install -y build-essential cmake libssl-dev libpcre3-dev git openssl
+echo "[+] Update system and install build dependencies..."
+apt update
+apt install -y build-essential cmake libssl-dev libpcre3-dev git openssl liblua5.3-dev libjson-c-dev libcurl4-openssl-dev
 
-echo "[+] Mengunduh dan mengkompilasi accel-ppp dari sumber..."
+echo "[+] Installing required kernel headers..."
+apt install -y linux-headers-$(uname -r)
+
+echo "[+] Downloading accel-ppp source code..."
 cd /usr/src
 git clone https://github.com/accel-ppp/accel-ppp.git
 cd accel-ppp
+
+echo "[+] Configuring and compiling accel-ppp..."
 mkdir build
 cd build
-cmake -DCMAKE_INSTALL_PREFIX=/usr -DKDIR=/usr/src/linux-headers-$(uname -r) ..
-make
+cmake -DCMAKE_INSTALL_PREFIX=/usr -DKDIR=/usr/src/linux-headers-$(uname -r) -DRADIUS=TRUE -DBUILD_IPOE=TRUE -DBUILD_VLAN_MON=TRUE ..
+make -j$(nproc)
 make install
 
-echo "[+] Membuat direktori konfigurasi dan log..."
+echo "[+] Creating configuration directories..."
 mkdir -p /etc/ssl/sstp /var/log/accel-ppp /etc/ppp
 chown -R root:root /etc/ssl/sstp
 chmod -R 700 /etc/ssl/sstp
 
-echo "[+] Membuat sertifikat self-signed..."
+echo "[+] Generating self-signed certificate..."
 openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
  -keyout /etc/ssl/sstp/server.key \
  -out /etc/ssl/sstp/server.crt \
  -subj "/CN=sstp-server" \
  -addext "subjectAltName=DNS:sstp-server"
 
-# Set permissions for certificate files
 chmod 600 /etc/ssl/sstp/server.key
 chmod 644 /etc/ssl/sstp/server.crt
-
 cp /etc/ssl/sstp/server.crt /etc/ssl/sstp/ca.crt
-chmod 644 /etc/ssl/sstp/ca.crt
 
-echo "[+] Membuat file akun SSTP..."
+echo "[+] Creating chap-secrets file..."
 cat <<EOF > /etc/ppp/chap-secrets
 # Secrets for authentication using CHAP
 # client    server  secret          IP addresses
@@ -41,7 +44,7 @@ vpnuser    *       vpnpassword     *
 EOF
 chmod 600 /etc/ppp/chap-secrets
 
-echo "[+] Membuat konfigurasi accel-ppp..."
+echo "[+] Creating accel-ppp configuration..."
 cat <<EOF > /etc/accel-ppp.conf
 [modules]
 log_file
@@ -100,7 +103,7 @@ level=3
 color=1
 EOF
 
-echo "[+] Membuat systemd service..."
+echo "[+] Creating systemd service..."
 cat <<EOF > /etc/systemd/system/accel-ppp.service
 [Unit]
 Description=Accel-PPP Server
@@ -113,51 +116,28 @@ PIDFile=/var/run/accel-pppd.pid
 Restart=on-failure
 RestartSec=5s
 
-# Hardening
-PrivateTmp=true
-ProtectSystem=full
-NoNewPrivileges=true
-LimitNOFILE=65536
-
 [Install]
 WantedBy=multi-user.target
 EOF
 
-echo "[+] Mengatur logging rotation..."
-cat <<EOF > /etc/logrotate.d/accel-ppp
-/var/log/accel-ppp/*.log {
-    daily
-    missingok
-    rotate 7
-    compress
-    delaycompress
-    notifempty
-    create 640 root adm
-    sharedscripts
-    postrotate
-        systemctl reload accel-ppp >/dev/null 2>&1 || true
-    endscript
-}
-EOF
-
-echo "[+] Reload daemon & enable service..."
+echo "[+] Enabling and starting service..."
 systemctl daemon-reload
 systemctl enable accel-ppp
 systemctl start accel-ppp
 
-echo "[+] Mengaktifkan IP forwarding..."
+echo "[+] Setting up IP forwarding..."
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 sysctl -p
 
-echo "[+] Menyiapkan firewall rules..."
+echo "[+] Configuring firewall..."
 apt install -y iptables-persistent
 iptables -t nat -A POSTROUTING -o $(ip route | grep default | awk '{print $5}') -j MASQUERADE
 iptables -A FORWARD -i sstp+ -j ACCEPT
 iptables-save > /etc/iptables/rules.v4
 
-echo "[✓] Instalasi selesai pada Debian 11"
-echo "    Cek status dengan: systemctl status accel-ppp"
-echo "    Port SSTP: 444 (pastikan terbuka di firewall)"
-echo "    Kredensial:"
-echo "      Username: vpnuser"
-echo "      Password: vpnpassword"
+echo "[+] Installation completed successfully!"
+echo "    SSTP Server is running on port 444"
+echo "    Test credentials:"
+echo "    Username: vpnuser"
+echo "    Password: vpnpassword"
+echo "    Check status: systemctl status accel-ppp"
