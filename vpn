@@ -238,8 +238,7 @@ while true; do
                     if [ $(date -d "$expiry_date" +%s) -lt $(date +%s) ]; then
                         echo -e "${RED}Account $user has EXPIRED on $expiry_date${NC}"
                     else
-                        days_left=$(( ($(date -d "$expiry_date" +%s) - $(date +%s) ))
-                        days_left=$(( days_left / 86400 ))
+                        days_left=$(( ( $(date -d "$expiry_date" +%s) - $(date +%s) ) / 86400 ))
                         echo -e "${GREEN}Account $user is ACTIVE until $expiry_date (${days_left} days remaining)${NC}"
                     fi
                 fi
