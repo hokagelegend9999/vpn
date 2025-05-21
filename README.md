@@ -32,6 +32,13 @@ wget https://raw.githubusercontent.com/hokagelegend9999/vpn/refs/heads/main/inst
 
 ```
 
+```
+cd /usr/bin/
+wget https://raw.githubusercontent.com/hokagelegend9999/vpn/refs/heads/main/vpn && sudo chmod +x /usr/local/bin/vpn
+cd
+```
+
+
 🛠 Cara Menggunakan Menu SSTP
 Setelah instalasi selesai, jalankan:
 
