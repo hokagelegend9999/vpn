@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # =============================================
-# HOKAGE VPN Master Script
-# Version: 5.0 - Ultimate Ninja Edition
+# HOKAGE VPN Installer - Ultimate Ninja Edition
+# Version: 5.2 - Complete Ready-to-Use Package
 # =============================================
 
 # Colors
@@ -28,11 +28,108 @@ show_banner() {
     echo -e "${CYAN}══════════════════════════════${NC}"
 }
 
-# ... [bagian fungsi lainnya tetap sama seperti sebelumnya] ...
+cleanup() {
+    show_banner
+    echo -e "${YELLOW}[!] Cleaning old installations...${NC}"
+    sudo systemctl stop accel-ppp 2>/dev/null
+    sudo pkill -9 accel-pppd 2>/dev/null
+    sudo rm -rf /usr/src/accel-ppp /etc/accel-ppp.conf /var/log/accel-ppp
+    echo -e "${GREEN}[✓] System purified!${NC}"
+    sleep 2
+}
+
+install_deps() {
+    show_banner
+    echo -e "\n${CYAN}» Installing ninja tools...${NC}"
+    sudo apt update -y && sudo apt install -y \
+        build-essential cmake git libssl-dev \
+        libpcre3-dev liblua5.1-0-dev libnl-3-dev \
+        libnl-genl-3-dev pkg-config iproute2 curl openssl
+    echo -e "${GREEN}[✓] Tools ready!${NC}"
+    sleep 2
+}
+
+install_accel() {
+    show_banner
+    echo -e "\n${CYAN}» Compiling shadow techniques...${NC}"
+    cd /usr/src
+    sudo git clone https://github.com/accel-ppp/accel-ppp.git
+    cd accel-ppp
+    git checkout 1.12.0
+    mkdir build && cd build
+    cmake -DCMAKE_INSTALL_PREFIX=/usr \
+          -DRADIUS=FALSE -DBUILD_DRIVER=FALSE ..
+    make -j$(nproc) && sudo make install
+    echo -e "${GREEN}[✓] Techniques mastered!${NC}"
+    sleep 2
+}
+
+configure_service() {
+    show_banner
+    echo -e "\n${CYAN}» Configuring ninja scrolls...${NC}"
+    
+    sudo mkdir -p /var/log/accel-ppp
+    
+    sudo tee /etc/accel-ppp.conf > /dev/null <<'ACCEL_EOF'
+[modules]
+ppp
+sstp
+auth-chap
+
+[core]
+log-error=/var/log/accel-ppp/error.log
+log-debug=/var/log/accel-ppp/debug.log
+
+[ppp]
+verbose=1
+mtu=1400
+mru=1400
+
+[sstp]
+bind=0.0.0.0:4433
+ssl-key=/etc/ssl/private/ssl.key
+ssl-cert=/etc/ssl/certs/ssl.crt
+
+[auth-chap]
+chap-secrets=/etc/ppp/chap-secrets
+
+[ip-pool]
+gw-ip=192.168.90.1
+pool-start=192.168.90.10
+pool-end=192.168.90.100
+ACCEL_EOF
+
+    sudo tee /etc/systemd/system/accel-ppp.service > /dev/null <<'SERVICE_EOF'
+[Unit]
+Description=HOKAGE VPN Server
+After=network.target
+
+[Service]
+Type=forking
+ExecStart=/usr/sbin/accel-pppd -c /etc/accel-ppp.conf -p /run/accel-pppd.pid
+PIDFile=/run/accel-pppd.pid
+Restart=on-failure
+TimeoutStartSec=60s
+Environment="ACCEL_PPP_DEBUG=99"
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+    sudo mkdir -p /etc/ssl/{private,certs}
+    sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout /etc/ssl/private/ssl.key \
+        -out /etc/ssl/certs/ssl.crt \
+        -subj "/CN=hokage-server"
+    sudo chmod 600 /etc/ssl/private/ssl.key
+    
+    echo -e "${GREEN}[✓] Scrolls encrypted!${NC}"
+    sleep 2
+}
 
 create_ui() {
     show_banner
-    echo -e "\n${CYAN}» Creating Ninja Scroll...${NC}"
+    echo -e "\n${CYAN}» Creating ninja interface...${NC}"
     
     sudo tee /usr/local/bin/hokage > /dev/null <<'UI_EOF'
 #!/bin/bash
@@ -130,11 +227,35 @@ done
 UI_EOF
 
     sudo chmod +x /usr/local/bin/hokage
-    echo -e "${GREEN}[✓] Ninja scroll prepared!${NC}"
+    echo -e "${GREEN}[✓] Ninja interface ready!${NC}"
     sleep 2
 }
 
-# ... [bagian main dan lainnya tetap sama] ...
+post_install() {
+    show_banner
+    echo -e "\n${CYAN}» Finalizing ninja deployment...${NC}"
+    
+    # Backup existing cron
+    sudo crontab -l > ~/cron_backup.txt 2>/dev/null
+    echo -e "${YELLOW}[!] Cron backup saved to ~/cron_backup.txt${NC}"
+    
+    # Ensure tendang cron job exists
+    if ! crontab -l | grep -q "/usr/bin/tendang"; then
+        echo -e "${YELLOW}[!] Restoring tendang technique...${NC}"
+        (crontab -l 2>/dev/null; echo "*/5 * * * * /usr/bin/tendang") | crontab -
+    fi
+    
+    # Verify service status
+    if systemctl is-active --quiet accel-ppp; then
+        echo -e "${GREEN}[✓] HOKAGE VPN is active${NC}"
+    else
+        echo -e "${RED}[!] VPN service not running!${NC}"
+        echo -e "${YELLOW}Trying to start...${NC}"
+        sudo systemctl start accel-ppp
+    fi
+    
+    sleep 2
+}
 
 main() {
     show_banner
