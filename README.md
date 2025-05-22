@@ -35,8 +35,11 @@ Jalankan satu perintah berikut di server Ubuntu/Debian kamu (akses root diperluk
 
 
 ```bash
+cd
+rm installer-sstp.sh
 wget https://raw.githubusercontent.com/hokagelegend9999/vpn/refs/heads/main/installer-sstp.sh && chmod +x installer-sstp.sh && sudo ./installer-sstp.sh
-
+cd
+rm installer-sstp.sh
 ```
 
 ```
