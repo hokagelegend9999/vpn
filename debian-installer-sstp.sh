@@ -1,3 +1,4 @@
+cat > debian-installer-sstp.sh <<'EOF'
 #!/bin/bash
 set -e
 
@@ -271,3 +272,7 @@ echo "    Configuration files:"
 echo "    - Main config: /etc/accel-ppp.conf"
 echo "    - User accounts: /etc/ppp/chap-secrets"
 echo "    - SSL certificates: /etc/ssl/sstp/"
+EOF
+
+chmod +x debian-installer-sstp.sh
+sudo ./debian-installer-sstp.sh
