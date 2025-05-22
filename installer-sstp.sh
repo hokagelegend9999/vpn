@@ -1,32 +1,65 @@
 #!/bin/bash
 set -e
 
-echo -e "\033[1;36m[+] Menambahkan repository accel-ppp...\033[0m"
-add-apt-repository -y ppa:accel-ppp/accel-ppp > /dev/null 2>&1 || { echo "Gagal menambahkan repository"; exit 1; }
+# Fungsi untuk menangani error
+function handle_error() {
+    echo -e "\033[1;31m[ERROR] $1\033[0m"
+    exit 1
+}
 
-echo -e "\033[1;36m[+] Update & install dependencies...\033[0m"
-apt update -y && apt install -y accel-ppp accel-ppp-tools openssl
+# Warna untuk output
+GREEN='\033[1;32m'
+BLUE='\033[1;34m'
+RED='\033[1;31m'
+NC='\033[0m' # No Color
 
-echo -e "\033[1;36m[+] Membuat direktori konfigurasi dan log...\033[0m"
+echo -e "${BLUE}[+] Menyiapkan sistem...${NC}"
+
+# Install dependensi dasar
+apt-get update && apt-get install -y software-properties-common wget || handle_error "Gagal install dependencies"
+
+echo -e "${BLUE}[+] Menambahkan repository accel-ppp...${NC}"
+# Untuk Ubuntu 20.04 (focal)
+add-apt-repository -y ppa:accel-ppp/accel-ppp || handle_error "Gagal menambahkan repository"
+
+echo -e "${BLUE}[+] Mengupdate paket dan install accel-ppp...${NC}"
+apt-get update && apt-get install -y accel-ppp accel-ppp-tools openssl || {
+    # Fallback jika repository tidak bekerja
+    echo -e "${RED}[!] Menggunakan fallback: kompilasi dari source...${NC}"
+    apt-get install -y git cmake build-essential libssl-dev libpcre3-dev
+    git clone https://github.com/accel-ppp/accel-ppp.git /tmp/accel-ppp
+    cd /tmp/accel-ppp
+    mkdir build
+    cd build
+    cmake -DBUILD_DRIVER=FALSE ..
+    make
+    make install
+    ldconfig
+}
+
+echo -e "${GREEN}[✓] accel-ppp berhasil diinstall${NC}"
+
+# Lanjutkan dengan bagian konfigurasi SSTP seperti sebelumnya
+echo -e "${BLUE}[+] Membuat direktori konfigurasi...${NC}"
 mkdir -p /etc/ssl/sstp /var/log/accel-ppp /etc/ppp
 
-echo -e "\033[1;36m[+] Membuat sertifikat self-signed...\033[0m"
+echo -e "${BLUE}[+] Membuat sertifikat SSL...${NC}"
 openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
- -keyout /etc/ssl/sstp/server.key \
- -out /etc/ssl/sstp/server.crt \
- -subj "/CN=sstp-server"
+    -keyout /etc/ssl/sstp/server.key \
+    -out /etc/ssl/sstp/server.crt \
+    -subj "/CN=sstp-server" || handle_error "Gagal membuat sertifikat"
 
 cp /etc/ssl/sstp/server.crt /etc/ssl/sstp/ca.crt
 
-echo -e "\033[1;36m[+] Membuat file akun SSTP...\033[0m"
+echo -e "${BLUE}[+] Membuat file autentikasi...${NC}"
 cat <<EOF > /etc/ppp/chap-secrets
-# Contoh format: username * password *
+# Format: username * password *
 vpnuser * vpnpassword *
 EOF
 chmod 600 /etc/ppp/chap-secrets
 
-echo -e "\033[1;36m[+] Membuat konfigurasi accel-ppp...\033[0m"
-cat <<EOF > /etc/accel-ppp.conf
+echo -e "${BLUE}[+] Membuat konfigurasi accel-ppp...${NC}"
+cat > /etc/accel-ppp.conf <<'EOL'
 [modules]
 log_file
 sstp
@@ -35,7 +68,7 @@ auth_mschap_v2
 ippool
 
 [core]
-log-error=/var/log/accel-ppp/accel-error.log
+log-error=/var/log/accel-ppp/error.log
 
 [common]
 ppp-max-mtu=1400
@@ -71,30 +104,36 @@ dns2=1.1.1.1
 [log]
 log-file=/var/log/accel-ppp/accel.log
 level=3
-EOF
+EOL
 
-echo -e "\033[1;36m[+] Membuat systemd service...\033[0m"
-cat <<EOF > /etc/systemd/system/accel-ppp.service
+echo -e "${BLUE}[+] Membuat service systemd...${NC}"
+cat > /etc/systemd/system/accel-ppp.service <<'EOL'
 [Unit]
-Description=HOKAGE VPN Server
+Description=Accel-PPP Server
 After=network.target
 
 [Service]
+Type=simple
 ExecStart=/usr/sbin/accel-pppd -c /etc/accel-ppp.conf
 Restart=always
 RestartSec=5
-Type=simple
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOL
 
-echo -e "\033[1;36m[+] Reload daemon & enable service...\033[0m"
+echo -e "${BLUE}[+] Memulai service...${NC}"
 systemctl daemon-reload
 systemctl enable --now accel-ppp
 
-echo -e "\033[1;32m[✓] Instalasi selesai!\033[0m"
-echo -e "\033[1;33mPerintah yang berguna:"
-echo -e "• Cek status: systemctl status accel-ppp"
-echo -e "• Restart service: systemctl restart accel-ppp"
-echo -e "• Lihat log: journalctl -u accel-ppp -f\033[0m"
+echo -e "${GREEN}[✓] Instalasi selesai!${NC}"
+echo -e "\nBerikut informasi yang perlu dicatat:"
+echo -e "• Port SSTP: ${GREEN}444${NC}"
+echo -e "• Username: ${GREEN}vpnuser${NC}"
+echo -e "• Password: ${GREEN}vpnpassword${NC}"
+echo -e "• Sertifikat CA: ${GREEN}/etc/ssl/sstp/ca.crt${NC}"
+echo -e "\nPerintah monitoring:"
+echo -e "• Status service: ${GREEN}systemctl status accel-ppp${NC}"
+echo -e "• Log service: ${GREEN}journalctl -u accel-ppp -f${NC}"
+rm
+installer-sstp.sh
