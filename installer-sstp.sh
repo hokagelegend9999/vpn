@@ -12,8 +12,10 @@ RED='\033[1;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Versi SoftEther yang diinginkan
-SOFTETHER_VERSION="4.43-9782"
+# Versi SoftEther terbaru
+SOFTETHER_VERSION="4.44-9807-rtm"
+DOWNLOAD_URL="https://github.com/SoftEtherVPN/SoftEtherVPN_Stable/releases/download/v4.44-9807-rtm/softether-vpnserver-v4.44-9807-rtm-2025.04.16-linux-arm64-64bit.tar.gz"
+ALTERNATE_URL="http://github.com/SoftEtherVPN/SoftEtherVPN_Stable/releases/download/v4.44-9807-rtm/softether-vpnserver-v4.44-9807-rtm-2025.04.16-linux-arm64-64bit.tar.gz"
 
 # ==============================================
 # FUNGSI UTILITAS
@@ -30,8 +32,10 @@ function show_header() {
     echo "|_____/ \___/ \__|\__|_|\___|\__|_|"
     echo -e "${NC}"
     echo -e "${YELLOW}=== SOFTETHER VPN INSTALLER ===${NC}"
-    echo -e "${BLUE}Versi Script: 2.1.0${NC}"
-    echo -e "${BLUE}OS Support: Ubuntu 20.04/22.04${NC}"
+    echo -e "${BLUE}Versi Script: 2.2.0${NC}"
+    echo -e "${BLUE}Versi SoftEther: ${SOFTETHER_VERSION}${NC}"
+    echo -e "${BLUE}OS Support: Linux ARM64 (Ubuntu/Debian)${NC}"
+    echo -e "${BLUE}Tanggal Rilis: 2025-04-16${NC}"
     echo ""
 }
 
@@ -42,7 +46,7 @@ function handle_error() {
 }
 
 # ==============================================
-# INSTALASI SOFTETHER VPN (FIX DOWNLOAD)
+# INSTALASI SOFTETHER VPN (VERSI TERBARU)
 # ==============================================
 
 function install_softether() {
@@ -50,32 +54,24 @@ function install_softether() {
     apt-get update
     apt-get install -y build-essential libreadline-dev libssl-dev libncurses-dev zlib1g-dev wget
     
-    echo -e "${BLUE}[+] Mencoba mengunduh SoftEther VPN...${NC}"
+    echo -e "${BLUE}[+] Mengunduh SoftEther VPN ${SOFTETHER_VERSION}...${NC}"
     
-    # Daftar mirror alternatif
-    MIRRORS=(
-        "https://github.com/SoftEtherVPN/SoftEtherVPN_Stable/releases/download/v${SOFTETHER_VERSION}/softether-vpnserver-v${SOFTETHER_VERSION}-linux-x64-64bit.tar.gz"
-        "https://jp.softether-download.com/files/softether/v${SOFTETHER_VERSION}-tree/Linux/SoftEther_VPN_Server/64bit_-_Intel_x64_or_AMD64/softether-vpnserver-v${SOFTETHER_VERSION}-linux-x64-64bit.tar.gz"
-        "https://us.softether-download.com/files/softether/v${SOFTETHER_VERSION}-tree/Linux/SoftEther_VPN_Server/64bit_-_Intel_x64_or_AMD64/softether-vpnserver-v${SOFTETHER_VERSION}-linux-x64-64bit.tar.gz"
-    )
-    
-    for mirror in "${MIRRORS[@]}"; do
-        echo -e "${YELLOW}[-] Mencoba dari: $mirror${NC}"
-        if wget --tries=3 --timeout=30 -O /tmp/softether.tar.gz "$mirror"; then
-            echo -e "${GREEN}[+] Berhasil mengunduh${NC}"
-            break
+    # Coba download dari URL utama (HTTPS)
+    echo -e "${YELLOW}[-] Mencoba dari URL utama (HTTPS)...${NC}"
+    if wget --tries=3 --timeout=30 -O /tmp/softether.tar.gz "$DOWNLOAD_URL"; then
+        echo -e "${GREEN}[+] Berhasil mengunduh${NC}"
+    else
+        echo -e "${RED}[!] Gagal mengunduh dari HTTPS, mencoba HTTP...${NC}"
+        # Coba download dari URL alternatif (HTTP)
+        if wget --tries=3 --timeout=30 -O /tmp/softether.tar.gz "$ALTERNATE_URL"; then
+            echo -e "${GREEN}[+] Berhasil mengunduh dari HTTP${NC}"
         else
-            echo -e "${RED}[!] Gagal mengunduh dari mirror ini${NC}"
-            rm -f /tmp/softether.tar.gz
+            echo -e "${RED}[ERROR] Gagal mengunduh dari semua sumber${NC}"
+            echo -e "${YELLOW}[!] Silakan unduh manual dari:${NC}"
+            echo -e "${BLUE}https://github.com/SoftEtherVPN/SoftEtherVPN_Stable/releases/tag/v4.44-9807-rtm${NC}"
+            echo -e "${YELLOW}dan simpan sebagai /tmp/softether.tar.gz lalu jalankan script lagi${NC}"
+            exit 1
         fi
-    done
-    
-    if [ ! -f /tmp/softether.tar.gz ]; then
-        echo -e "${RED}[ERROR] Gagal mengunduh dari semua mirror${NC}"
-        echo -e "${YELLOW}[!] Silakan unduh manual dari:${NC}"
-        echo -e "${BLUE}https://www.softether-download.com/${NC}"
-        echo -e "${YELLOW}dan simpan sebagai /tmp/softether.tar.gz lalu jalankan script lagi${NC}"
-        exit 1
     fi
 
     echo -e "${BLUE}[+] Mengekstrak paket...${NC}"
@@ -120,10 +116,10 @@ EOL
 # ==============================================
 
 function configure_softether() {
-    echo -e "${BLUE}[+] Membuat konfigurasi dasar...${NC}"
+    echo -e "${BLUE}[+] Membuat konfigurasi dasar (tunggu 10 detik)...${NC}"
     
     # Tunggu hingga service benar-benar aktif
-    sleep 5
+    sleep 10
     
     # Set password admin
     /usr/local/vpnserver/vpncmd localhost /SERVER /CMD ServerPasswordSet Admin123
@@ -156,6 +152,10 @@ function configure_softether() {
     ufw allow 500/udp
     ufw allow 4500/udp
     ufw allow 1701/udp
+    
+    # Untuk ARM64 khusus
+    ufw allow 22/tcp   # SSH
+    ufw --force enable
 }
 
 # ==============================================
@@ -180,6 +180,8 @@ configure_softether
 echo -e "\n${GREEN}[✓] INSTALASI SOFTETHER VPN BERHASIL${NC}"
 echo -e "${YELLOW}========================================${NC}"
 echo -e "${BLUE}Informasi Server VPN:${NC}"
+echo -e "Versi: ${GREEN}${SOFTETHER_VERSION}${NC}"
+echo -e "Arsitektur: ${GREEN}ARM64${NC}"
 echo -e "SSTP Port: ${GREEN}443${NC}"
 echo -e "OpenVPN Port: ${GREEN}1194${NC}"
 echo -e "L2TP/IPsec Port: ${GREEN}1701${NC}"
@@ -187,6 +189,7 @@ echo -e "Admin Port: ${GREEN}5555${NC}"
 echo -e "User: ${GREEN}vpnuser${NC} | Pass: ${GREEN}password123${NC}"
 echo -e "IPsec Pre-Shared Key: ${GREEN}vpnprekey${NC}"
 echo -e "Admin Password: ${GREEN}Admin123${NC}"
+echo -e "Hub Password: ${GREEN}hub123${NC}"
 echo -e "${YELLOW}========================================${NC}"
 echo -e "${BLUE}Perintah manajemen:${NC}"
 echo -e "Start: ${GREEN}systemctl start vpnserver${NC}"
