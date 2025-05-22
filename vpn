@@ -55,19 +55,16 @@ check_vpn_service() {
     # Check service status
     case $service_name in
         "pptpd")
-            # First try systemctl, then check process
             if systemctl is-active --quiet $service_name 2>/dev/null || pgrep pptpd >/dev/null; then
                 service_status="${GREEN}● RUNNING${NC}"
             else
                 service_status="${RED}● STOPPED${NC}"
             fi
             
-            # Check port
             if ss -tuln | grep -q ":$port "; then
                 port_status="${GREEN}✓${NC}"
             else
                 port_status="${RED}✗${NC}"
-                # Special check for PPTP which uses GRE protocol (not TCP/UDP)
                 if ping -c 1 -w 1 $PUBLIC_IP | grep -q "ttl"; then
                     port_status="${GREEN}✓ (GRE)${NC}"
                     service_status="${GREEN}● RUNNING${NC}"
@@ -100,7 +97,6 @@ check_vpn_service() {
                 port_status="${GREEN}✓${NC}"
             else
                 port_status="${RED}✗${NC}"
-                # L2TP might be running but not showing in ss due to encapsulation
                 if ipsec status | grep -q "INSTALLED"; then
                     port_status="${GREEN}✓ (IPSec)${NC}"
                     service_status="${GREEN}● RUNNING${NC}"
@@ -117,10 +113,17 @@ check_vpn_service() {
     echo -e "$service_status (Port $port: $port_status)"
 }
 
-# Path
-CHAP_FILE="/home/sstp/sstp_account"
-EXPIRY_FILE="/home/sstp/account_expiry"
+# Paths
+CHAP_FILE="/etc/ppp/chap-secrets"
+EXPIRY_FILE="/etc/ppp/account_expiry"
 LOG_FILE="/var/log/vpn_users.log"
+SSTP_CONFIG="/etc/accel-ppp.conf"
+
+# Create necessary files if they don't exist
+[ -f "$CHAP_FILE" ] || touch "$CHAP_FILE"
+[ -f "$EXPIRY_FILE" ] || touch "$EXPIRY_FILE"
+[ -f "$LOG_FILE" ] || touch "$LOG_FILE"
+chmod 600 "$CHAP_FILE" "$EXPIRY_FILE"
 
 # Display Header
 display_header() {
@@ -142,7 +145,7 @@ display_header() {
     echo -e "${CYAN}└──────────────────────────────────────────────────────────────────┘${NC}"
     echo -e "${CYAN}┌─────────────────────── VPN SERVICE STATUS ───────────────────────┐"
     echo -e "${CYAN}│ ${YELLOW}🔌 PPTP Service : $(check_vpn_service pptpd 1723 tcp)"
-    echo -e "${CYAN}│ ${YELLOW}🌐 SSTP Service : $(check_vpn_service accel-ppp 443 tcp)"
+    echo -e "${CYAN}│ ${YELLOW}🌐 SSTP Service : $(check_vpn_service accel-ppp 4433 tcp)"
     echo -e "${CYAN}│ ${YELLOW}🛡️ L2TP Service : $(check_vpn_service xl2tpd 1701 udp)"
     echo -e "${CYAN}└──────────────────────────────────────────────────────────────────┘${NC}"
     echo ""
@@ -174,7 +177,6 @@ manage_vpn_service() {
         "pptpd")
             if [[ $action == "restart" ]]; then
                 systemctl restart pptpd 2>/dev/null || service pptpd restart 2>/dev/null
-                # Ensure GRE protocol is allowed
                 iptables -I INPUT -p gre -j ACCEPT
             fi
             ;;
@@ -183,7 +185,6 @@ manage_vpn_service() {
             ;;
         "xl2tpd")
             systemctl $action xl2tpd 2>/dev/null
-            # Restart IPSec if L2TP is being restarted
             if [[ $action == "restart" ]]; then
                 systemctl restart ipsec 2>/dev/null
             fi
@@ -191,98 +192,212 @@ manage_vpn_service() {
     esac
 }
 
+# Create VPN User
+create_vpn_user() {
+    while true; do
+        read -rp "$(echo -e "${BLUE}▶ Enter username: ${NC}")" user
+        if grep -q "^$user " "$CHAP_FILE"; then
+            echo -e "${RED}✖ Username already exists!${NC}"
+            continue
+        fi
+        break
+    done
+    
+    read -rsp "$(echo -e "${BLUE}▶ Enter password: ${NC}")" pass
+    echo
+    read -rsp "$(echo -e "${BLUE}▶ Confirm password: ${NC}")" pass_confirm
+    echo
+    
+    if [ "$pass" != "$pass_confirm" ]; then
+        echo -e "${RED}✖ Passwords do not match!${NC}"
+        return 1
+    fi
+    
+    while true; do
+        read -rp "$(echo -e "${YELLOW}▶ Expiry period (e.g. '7 days', '1 month', '1 year'): ${NC}")" expiry
+        expiry_date=$(calculate_expiry "$expiry")
+        
+        echo -e "${CYAN}┌──────────────────────────────────────────────────────┐"
+        echo -e "${CYAN}│ ${GREEN}✓ New VPN Account Details:${NC}"
+        echo -e "${CYAN}│ ${YELLOW}Username: ${GREEN}$user${NC}"
+        echo -e "${CYAN}│ ${YELLOW}Password: ${GREEN}${pass:0:1}*****${pass: -1}${NC}"
+        echo -e "${CYAN}│ ${YELLOW}Expiry Date: ${GREEN}$expiry_date${NC}"
+        echo -e "${CYAN}└──────────────────────────────────────────────────────┘${NC}"
+        
+        read -rp "$(echo -e "${YELLOW}▶ Confirm creation? [y/N]: ${NC}")" confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            echo "$user * $pass *" >> "$CHAP_FILE"
+            echo "$user $expiry_date" >> "$EXPIRY_FILE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - Created user: $user (Expiry: $expiry_date)" >> "$LOG_FILE"
+            echo -e "${GREEN}✔ User $user created successfully!${NC}"
+            
+            # Restart services to apply changes
+            manage_vpn_service accel-ppp restart
+            return 0
+        else
+            echo -e "${YELLOW}✖ User creation cancelled${NC}"
+            return 1
+        fi
+    done
+}
+
+# Delete VPN User
+delete_vpn_user() {
+    echo -e "${CYAN}┌────────────────────── ACTIVE USERS ──────────────────────┐"
+    printf "%-20s %-20s\n" "Username" "Expiry Date"
+    echo "--------------------------------------------------"
+    if [ -s "$EXPIRY_FILE" ]; then
+        while read -r line; do
+            uname=$(echo "$line" | awk '{print $1}')
+            exp=$(echo "$line" | awk '{print $2}')
+            if [ "$(date -d "$exp" +%s)" -lt "$(date +%s)" ]; then
+                printf "${RED}%-20s %-20s (EXPIRED)${NC}\n" "$uname" "$exp"
+            else
+                printf "%-20s %-20s\n" "$uname" "$exp"
+            fi
+        done < "$EXPIRY_FILE"
+    else
+        echo -e "${RED}No users found${NC}"
+    fi
+    echo -e "${CYAN}└──────────────────────────────────────────────────────────┘${NC}"
+    
+    read -rp "$(echo -e "${YELLOW}▶ Enter username to delete: ${NC}")" user
+    
+    if grep -q "^$user " "$CHAP_FILE"; then
+        read -rp "$(echo -e "${RED}⚠ Are you sure you want to delete $user? [y/N]: ${NC}")" confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            sed -i "/^$user /d" "$CHAP_FILE"
+            sed -i "/^$user /d" "$EXPIRY_FILE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleted user: $user" >> "$LOG_FILE"
+            echo -e "${GREEN}✔ User $user deleted successfully${NC}"
+            
+            # Restart services to apply changes
+            manage_vpn_service accel-ppp restart
+        else
+            echo -e "${YELLOW}✖ User deletion cancelled${NC}"
+        fi
+    else
+        echo -e "${RED}✖ User $user not found${NC}"
+    fi
+}
+
+# View All Users
+view_all_users() {
+    echo -e "${CYAN}┌─────────────────────── VPN USERS ───────────────────────┐"
+    printf "%-20s %-20s %-10s\n" "Username" "Expiry Date" "Status"
+    echo "------------------------------------------------------------"
+    
+    if [ -s "$EXPIRY_FILE" ]; then
+        current_date=$(date +%s)
+        
+        while read -r line; do
+            uname=$(echo "$line" | awk '{print $1}')
+            exp=$(echo "$line" | awk '{print $2}')
+            exp_date=$(date -d "$exp" +%s)
+            
+            if [ "$exp_date" -lt "$current_date" ]; then
+                status="${RED}EXPIRED${NC}"
+            else
+                days_left=$(( (exp_date - current_date) / 86400 ))
+                if [ "$days_left" -le 7 ]; then
+                    status="${YELLOW}SOON${NC} (${days_left}d)"
+                else
+                    status="${GREEN}ACTIVE${NC}"
+                fi
+            fi
+            
+            printf "%-20s %-20s %b\n" "$uname" "$exp" "$status"
+        done < "$EXPIRY_FILE"
+    else
+        echo -e "${RED}No VPN users found${NC}"
+    fi
+    
+    total_users=$(wc -l < "$EXPIRY_FILE" 2>/dev/null || echo 0)
+    active_users=$(grep -v "EXPIRED" "$EXPIRY_FILE" | wc -l 2>/dev/null || echo 0)
+    
+    echo -e "${CYAN}├──────────────────────────────────────────────────────────┤"
+    echo -e "${CYAN}│ ${YELLOW}Total Users: ${GREEN}$total_users${NC} | ${YELLOW}Active Users: ${GREEN}$active_users${NC}"
+    echo -e "${CYAN}└──────────────────────────────────────────────────────────┘${NC}"
+    
+    read -rp "$(echo -e "${YELLOW}▶ Press Enter to return...${NC}")"
+}
+
+# Restart VPN Services
+restart_vpn_services() {
+    echo -e "${YELLOW}Restarting all VPN services...${NC}"
+    
+    echo -e "${BLUE}▶ Restarting PPTP...${NC}"
+    manage_vpn_service pptpd restart
+    
+    echo -e "${BLUE}▶ Restarting SSTP...${NC}"
+    manage_vpn_service accel-ppp restart
+    
+    echo -e "${BLUE}▶ Restarting L2TP/IPSec...${NC}"
+    manage_vpn_service xl2tpd restart
+    
+    echo -e "${GREEN}✔ All VPN services restarted successfully${NC}"
+    sleep 2
+}
+
+# Fix VPN Services
+fix_vpn_services() {
+    echo -e "${YELLOW}Running VPN service diagnostics and repairs...${NC}"
+    
+    # Check and fix PPTP
+    if ! pgrep pptpd >/dev/null; then
+        echo -e "${BLUE}▶ Starting PPTP service...${NC}"
+        manage_vpn_service pptpd start
+        iptables -I INPUT -p gre -j ACCEPT
+    fi
+    
+    # Check and fix SSTP
+    if ! systemctl is-active --quiet accel-ppp; then
+        echo -e "${BLUE}▶ Starting SSTP service...${NC}"
+        manage_vpn_service accel-ppp start
+    fi
+    
+    # Check and fix L2TP/IPSec
+    if ! systemctl is-active --quiet xl2tpd; then
+        echo -e "${BLUE}▶ Starting L2TP/IPSec services...${NC}"
+        manage_vpn_service xl2tpd start
+        systemctl start ipsec 2>/dev/null
+        iptables -I INPUT -p udp --dport 500 -j ACCEPT
+        iptables -I INPUT -p udp --dport 4500 -j ACCEPT
+    fi
+    
+    # Verify services
+    echo -e "${CYAN}┌────────────────── SERVICE STATUS AFTER FIX ─────────────────┐"
+    echo -e "${CYAN}│ ${YELLOW}🔌 PPTP Service : $(check_vpn_service pptpd 1723 tcp)"
+    echo -e "${CYAN}│ ${YELLOW}🌐 SSTP Service : $(check_vpn_service accel-ppp 4433 tcp)"
+    echo -e "${CYAN}│ ${YELLOW}🛡️ L2TP Service : $(check_vpn_service xl2tpd 1701 udp)"
+    echo -e "${CYAN}└────────────────────────────────────────────────────────────┘${NC}"
+    
+    echo -e "${GREEN}✔ VPN service repairs completed${NC}"
+    sleep 2
+}
+
 # Main Menu
 while true; do
     display_header
-    echo -e "${CYAN}┌────────────────────────────────────────────────────────────────────┐"
-    echo -e "${CYAN}│ ${YELLOW}📋 MAIN MENU:${NC}                                                         │"
-    echo -e "${CYAN}│                                                                    │"
-    echo -e "${CYAN}│ ${BLUE}1. ${YELLOW}➕ Create new user account${NC}                                     │"
-    echo -e "${CYAN}│ ${BLUE}2. ${YELLOW}➖ Delete user account${NC}                                        │"
-    echo -e "${CYAN}│ ${BLUE}3. ${YELLOW}👥 View all users${NC}                                            │"
-    echo -e "${CYAN}│ ${BLUE}4. ${YELLOW}🔄 Restart VPN Services${NC}                                      │"
-    echo -e "${CYAN}│ ${BLUE}5. ${YELLOW}🔧 Fix VPN Services${NC}                                          │"
-    echo -e "${CYAN}│ ${BLUE}0. ${YELLOW}🚪 Exit${NC}                                                      │"
-    echo -e "${CYAN}└────────────────────────────────────────────────────────────────────┘${NC}"
+    echo -e "${CYAN}┌─────────────────────── MAIN MENU ────────────────────────┐"
+    echo -e "${CYAN}│                                                          │"
+    echo -e "${CYAN}│ ${BLUE}1. ${YELLOW}➕ Create new VPN user account${NC}                   │"
+    echo -e "${CYAN}│ ${BLUE}2. ${YELLOW}➖ Delete VPN user account${NC}                      │"
+    echo -e "${CYAN}│ ${BLUE}3. ${YELLOW}👥 View all VPN users${NC}                          │"
+    echo -e "${CYAN}│ ${BLUE}4. ${YELLOW}🔄 Restart all VPN services${NC}                     │"
+    echo -e "${CYAN}│ ${BLUE}5. ${YELLOW}🔧 Fix VPN services${NC}                            │"
+    echo -e "${CYAN}│ ${BLUE}0. ${YELLOW}🚪 Exit${NC}                                       │"
+    echo -e "${CYAN}└──────────────────────────────────────────────────────────┘${NC}"
     echo ""
     
     read -rp "$(echo -e "${YELLOW}▶ Select option [0-5]: ${NC}")" choice
 
     case "$choice" in
-        1)
-            read -rp "$(echo -e "${BLUE}▶ Enter username: ${NC}")" user
-            read -rsp "$(echo -e "${BLUE}▶ Enter password: ${NC}")" pass
-            echo
-            read -rp "$(echo -e "${YELLOW}▶ Expiry (e.g. '7 days', '1 month'): ${NC}")" expiry
-            expiry_date=$(calculate_expiry "$expiry")
-            echo "$user * $pass *" >> "$CHAP_FILE"
-            echo "$user $expiry_date" >> "$EXPIRY_FILE"
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - Created user: $user (Expiry: $expiry_date)" >> "$LOG_FILE"
-            echo -e "${GREEN}✔ User $user added. Expiry: $expiry_date${NC}"
-            sleep 1
-            ;;
-        2)
-            read -rp "$(echo -e "${BLUE}▶ Enter username to delete: ${NC}")" user
-            if grep -q "^$user " "$CHAP_FILE"; then
-                sed -i "/^$user /d" "$CHAP_FILE"
-                sed -i "/^$user /d" "$EXPIRY_FILE"
-                echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleted user: $user" >> "$LOG_FILE"
-                echo -e "${GREEN}✔ User $user deleted${NC}"
-            else
-                echo -e "${RED}✖ User $user not found${NC}"
-            fi
-            sleep 1
-            ;;
-        3)
-            echo -e "${CYAN}┌──────────────────── USERS ─────────────────────┐"
-            printf "%-20s %-20s\n" "Username" "Expiry Date"
-            echo "--------------------------------------------------"
-            if [ -f "$EXPIRY_FILE" ]; then
-                while read -r line; do
-                    uname=$(echo "$line" | awk '{print $1}')
-                    exp=$(echo "$line" | awk '{print $2}')
-                    if [ "$(date -d "$exp" +%s)" -lt "$(date +%s)" ]; then
-                        printf "${RED}%-20s %-20s (EXPIRED)${NC}\n" "$uname" "$exp"
-                    else
-                        printf "%-20s %-20s\n" "$uname" "$exp"
-                    fi
-                done < "$EXPIRY_FILE"
-            else
-                echo -e "${RED}No users found${NC}"
-            fi
-            echo -e "${CYAN}└──────────────────────────────────────────────────┘${NC}"
-            read -rp "$(echo -e "${YELLOW}▶ Press Enter to return...${NC}")"
-            ;;
-        4)
-            echo -e "${YELLOW}Restarting VPN services...${NC}"
-            manage_vpn_service pptpd restart
-            manage_vpn_service accel-ppp restart
-            manage_vpn_service xl2tpd restart
-            echo -e "${GREEN}✔ VPN services restarted successfully${NC}"
-            sleep 2
-            ;;
-        5)
-            echo -e "${YELLOW}Attempting to fix VPN services...${NC}"
-            
-            # Fix PPTP
-            if ! pgrep pptpd >/dev/null; then
-                echo -e "${BLUE}▶ Starting PPTP service...${NC}"
-                manage_vpn_service pptpd start
-                iptables -I INPUT -p gre -j ACCEPT
-            fi
-            
-            # Fix L2TP
-            if ! systemctl is-active --quiet xl2tpd; then
-                echo -e "${BLUE}▶ Starting L2TP/IPSec services...${NC}"
-                manage_vpn_service xl2tpd start
-                systemctl start ipsec 2>/dev/null
-                iptables -I INPUT -p udp --dport 500 -j ACCEPT
-                iptables -I INPUT -p udp --dport 4500 -j ACCEPT
-            fi
-            
-            echo -e "${GREEN}✔ VPN service fixes attempted${NC}"
-            sleep 2
-            ;;
+        1) create_vpn_user ;;
+        2) delete_vpn_user ;;
+        3) view_all_users ;;
+        4) restart_vpn_services ;;
+        5) fix_vpn_services ;;
         0)
             echo -e "${BLUE}👋 Goodbye!${NC}"
             exit 0
