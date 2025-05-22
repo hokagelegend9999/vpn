@@ -12,8 +12,8 @@ RED='\033[1;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Versi SoftEther yang diinginkan (diperbarui)
-SOFTETHER_VERSION="4.43-9782-beta"
+# Versi SoftEther yang diinginkan
+SOFTETHER_VERSION="4.43-9782"
 
 # ==============================================
 # FUNGSI UTILITAS
@@ -30,7 +30,7 @@ function show_header() {
     echo "|_____/ \___/ \__|\__|_|\___|\__|_|"
     echo -e "${NC}"
     echo -e "${YELLOW}=== SOFTETHER VPN INSTALLER ===${NC}"
-    echo -e "${BLUE}Versi Script: 2.0.1${NC}"
+    echo -e "${BLUE}Versi Script: 2.1.0${NC}"
     echo -e "${BLUE}OS Support: Ubuntu 20.04/22.04${NC}"
     echo ""
 }
@@ -42,7 +42,7 @@ function handle_error() {
 }
 
 # ==============================================
-# INSTALASI SOFTETHER VPN (DIPERBARUI)
+# INSTALASI SOFTETHER VPN (FIX DOWNLOAD)
 # ==============================================
 
 function install_softether() {
@@ -50,15 +50,33 @@ function install_softether() {
     apt-get update
     apt-get install -y build-essential libreadline-dev libssl-dev libncurses-dev zlib1g-dev wget
     
-    echo -e "${BLUE}[+] Mengunduh SoftEther VPN...${NC}"
-    # URL alternatif yang bekerja
-    wget https://www.softether-download.com/files/softether/v4.43-9782-beta-2024.05.26-tree/Linux/SoftEther_VPN_Server/64bit_-_Intel_x64_or_AMD64/softether-vpnserver-v4.43-9782-beta-2024.05.26-linux-x64-64bit.tar.gz -O /tmp/softether.tar.gz || {
-        handle_error "Gagal mengunduh dari sumber utama, mencoba mirror alternatif..."
-        wget https://github.com/SoftEtherVPN/SoftEtherVPN_Stable/releases/download/v4.43-9782-beta/softether-vpnserver-v4.43-9782-beta-2024.05.26-linux-x64-64bit.tar.gz -O /tmp/softether.tar.gz || {
-            handle_error "Gagal mengunduh dari mirror alternatif"
-            return 1
-        }
-    }
+    echo -e "${BLUE}[+] Mencoba mengunduh SoftEther VPN...${NC}"
+    
+    # Daftar mirror alternatif
+    MIRRORS=(
+        "https://github.com/SoftEtherVPN/SoftEtherVPN_Stable/releases/download/v${SOFTETHER_VERSION}/softether-vpnserver-v${SOFTETHER_VERSION}-linux-x64-64bit.tar.gz"
+        "https://jp.softether-download.com/files/softether/v${SOFTETHER_VERSION}-tree/Linux/SoftEther_VPN_Server/64bit_-_Intel_x64_or_AMD64/softether-vpnserver-v${SOFTETHER_VERSION}-linux-x64-64bit.tar.gz"
+        "https://us.softether-download.com/files/softether/v${SOFTETHER_VERSION}-tree/Linux/SoftEther_VPN_Server/64bit_-_Intel_x64_or_AMD64/softether-vpnserver-v${SOFTETHER_VERSION}-linux-x64-64bit.tar.gz"
+    )
+    
+    for mirror in "${MIRRORS[@]}"; do
+        echo -e "${YELLOW}[-] Mencoba dari: $mirror${NC}"
+        if wget --tries=3 --timeout=30 -O /tmp/softether.tar.gz "$mirror"; then
+            echo -e "${GREEN}[+] Berhasil mengunduh${NC}"
+            break
+        else
+            echo -e "${RED}[!] Gagal mengunduh dari mirror ini${NC}"
+            rm -f /tmp/softether.tar.gz
+        fi
+    done
+    
+    if [ ! -f /tmp/softether.tar.gz ]; then
+        echo -e "${RED}[ERROR] Gagal mengunduh dari semua mirror${NC}"
+        echo -e "${YELLOW}[!] Silakan unduh manual dari:${NC}"
+        echo -e "${BLUE}https://www.softether-download.com/${NC}"
+        echo -e "${YELLOW}dan simpan sebagai /tmp/softether.tar.gz lalu jalankan script lagi${NC}"
+        exit 1
+    fi
 
     echo -e "${BLUE}[+] Mengekstrak paket...${NC}"
     tar xzvf /tmp/softether.tar.gz -C /tmp
@@ -103,6 +121,9 @@ EOL
 
 function configure_softether() {
     echo -e "${BLUE}[+] Membuat konfigurasi dasar...${NC}"
+    
+    # Tunggu hingga service benar-benar aktif
+    sleep 5
     
     # Set password admin
     /usr/local/vpnserver/vpncmd localhost /SERVER /CMD ServerPasswordSet Admin123
@@ -165,6 +186,7 @@ echo -e "L2TP/IPsec Port: ${GREEN}1701${NC}"
 echo -e "Admin Port: ${GREEN}5555${NC}"
 echo -e "User: ${GREEN}vpnuser${NC} | Pass: ${GREEN}password123${NC}"
 echo -e "IPsec Pre-Shared Key: ${GREEN}vpnprekey${NC}"
+echo -e "Admin Password: ${GREEN}Admin123${NC}"
 echo -e "${YELLOW}========================================${NC}"
 echo -e "${BLUE}Perintah manajemen:${NC}"
 echo -e "Start: ${GREEN}systemctl start vpnserver${NC}"
