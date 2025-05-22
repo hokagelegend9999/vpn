@@ -14,13 +14,13 @@ NC='\033[0m'
 
 # Versi SoftEther terbaru
 SOFTETHER_VERSION="4.44-9807-rtm"
-DOWNLOAD_URL="https://github.com/SoftEtherVPN/SoftEtherVPN_Stable/releases/download/v4.44-9807-rtm/softether-vpnserver-v4.44-9807-rtm-2025.04.16-linux-arm64-64bit.tar.gz"
-ALTERNATE_URL="http://github.com/SoftEtherVPN/SoftEtherVPN_Stable/releases/download/v4.44-9807-rtm/softether-vpnserver-v4.44-9807-rtm-2025.04.16-linux-arm64-64bit.tar.gz"
+DOWNLOAD_URL="https://github.com/SoftEtherVPN/SoftEtherVPN_Stable/releases/download/v4.44-9807-rtm/softether-vpnserver-v4.44-9807-rtm-2025.04.16-linux-x64-64bit.tar.gz"
+ALTERNATE_URL="http://github.com/SoftEtherVPN/SoftEtherVPN_Stable/releases/download/v4.44-9807-rtm/softether-vpnserver-v4.44-9807-rtm-2025.04.16-linux-x64-64bit.tar.gz"
 
 # Verifikasi arsitektur
 ARCH=$(uname -m)
-if [ "$ARCH" != "aarch64" ] && [ "$ARCH" != "arm64" ]; then
-    echo -e "${RED}[ERROR] Script ini hanya untuk sistem ARM64 (aarch64)${NC}"
+if [ "$ARCH" != "x86_64" ]; then
+    echo -e "${RED}[ERROR] Script ini hanya untuk sistem x86_64${NC}"
     echo -e "${YELLOW}Arsitektur sistem Anda: $ARCH${NC}"
     exit 1
 fi
@@ -42,7 +42,7 @@ function show_header() {
     echo -e "${YELLOW}=== SOFTETHER VPN INSTALLER ===${NC}"
     echo -e "${BLUE}Versi Script: 2.2.0${NC}"
     echo -e "${BLUE}Versi SoftEther: ${SOFTETHER_VERSION}${NC}"
-    echo -e "${BLUE}OS Support: Linux ARM64 (Ubuntu/Debian)${NC}"
+    echo -e "${BLUE}OS Support: Linux x86_64 (Ubuntu/Debian)${NC}"
     echo -e "${BLUE}Tanggal Rilis: 2025-04-16${NC}"
     echo ""
 }
@@ -60,8 +60,7 @@ function handle_error() {
 function install_softether() {
     echo -e "${BLUE}[+] Menginstall dependencies...${NC}"
     apt-get update
-    apt-get install -y build-essential libreadline-dev libssl-dev libncurses-dev zlib1g-dev wget \
-        gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+    apt-get install -y build-essential libreadline-dev libssl-dev libncurses-dev zlib1g-dev wget
     
     echo -e "${BLUE}[+] Mengunduh SoftEther VPN ${SOFTETHER_VERSION}...${NC}"
     
@@ -92,8 +91,8 @@ function install_softether() {
     find . -type f -name "*.o" -exec rm -f {} \;
     make clean
     
-    # Kompilasi dengan flag ARM64
-    make CC="gcc -march=armv8-a" CXX="g++ -march=armv8-a" -j$(nproc)
+    # Kompilasi untuk x86_64
+    make -j$(nproc)
     
     echo -e "${BLUE}[+] Menginstall ke /usr/local/vpnserver...${NC}"
     mkdir -p /usr/local/vpnserver
@@ -124,6 +123,7 @@ EOL
     systemctl enable vpnserver
     systemctl start vpnserver
 }
+
 # ==============================================
 # KONFIGURASI DASAR SOFTETHER
 # ==============================================
@@ -166,7 +166,7 @@ function configure_softether() {
     ufw allow 4500/udp
     ufw allow 1701/udp
     
-    # Untuk ARM64 khusus
+    # Untuk x86_64 khusus
     ufw allow 22/tcp   # SSH
     ufw --force enable
 }
@@ -194,7 +194,7 @@ echo -e "\n${GREEN}[✓] INSTALASI SOFTETHER VPN BERHASIL${NC}"
 echo -e "${YELLOW}========================================${NC}"
 echo -e "${BLUE}Informasi Server VPN:${NC}"
 echo -e "Versi: ${GREEN}${SOFTETHER_VERSION}${NC}"
-echo -e "Arsitektur: ${GREEN}ARM64${NC}"
+echo -e "Arsitektur: ${GREEN}x86_64${NC}"
 echo -e "SSTP Port: ${GREEN}443${NC}"
 echo -e "OpenVPN Port: ${GREEN}1194${NC}"
 echo -e "L2TP/IPsec Port: ${GREEN}1701${NC}"
