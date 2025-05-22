@@ -2,11 +2,16 @@
 
 set -e
 
-# Ganti dengan IP server kamu
+# Konfigurasi
 SERVER_IP=$(curl -s ifconfig.me)
 VPN_USER="vpnuser"
 VPN_PASS="vpnpassword"
 VPN_PSK="vpnsharedkey"
+
+# Warna untuk status
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
 
 echo "========================================"
 echo "  VPN INSTALLER - PPTP + L2TP + SSTP"
@@ -20,7 +25,7 @@ apt update && apt install -y \
   strongswan xl2tpd \
   ppp \
   iptables-persistent \
-  git build-essential libssl-dev libpcap-dev
+  python3-pip
 
 echo "[2] Setup PPTP Server"
 /bin/cat > /etc/pptpd.conf <<EOF
@@ -43,6 +48,7 @@ systemctl restart pptpd
 systemctl enable pptpd
 
 echo "[3] Setup L2TP/IPSec"
+
 cat > /etc/ipsec.conf <<EOF
 config setup
     charondebug="ike 2, knl 2, cfg 2"
@@ -108,14 +114,13 @@ EOF
 
 systemctl restart strongswan-starter
 systemctl enable strongswan-starter
+
 systemctl restart xl2tpd
-systemctl enable strongswan xl2tpd
+systemctl enable xl2tpd
 
 echo "[4] Setup SSTP Server"
-cd /opt
-git clone https://github.com/sarfata/sstp-server.git
-cd sstp-server
-make && make install
+
+pip3 install git+https://github.com/sorz/sstp-server.git
 
 mkdir -p /etc/sstp
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
@@ -128,14 +133,13 @@ Description=SSTP VPN Server
 After=network.target
 
 [Service]
-ExecStart=/usr/local/sbin/sstpd --iprange 192.168.2.10-192.168.2.20 --cert /etc/sstp/sstp.crt --key /etc/sstp/sstp.key
+ExecStart=/usr/local/bin/sstpd --iprange 192.168.2.10-192.168.2.20 --cert /etc/sstp/sstp.crt --key /etc/sstp/sstp.key
 Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reexec
 systemctl daemon-reload
 systemctl enable sstpd
 systemctl start sstpd
@@ -147,3 +151,23 @@ echo " User VPN    : $VPN_USER"
 echo " Password    : $VPN_PASS"
 echo " Pre-shared key (L2TP) : $VPN_PSK"
 echo "========================================"
+
+
+# Menu status layanan VPN
+function status_service() {
+  local name=$1
+  local service=$2
+  if systemctl is-active --quiet $service; then
+    echo -e "$name: ${GREEN}✔ RUNNING${NC}"
+  else
+    echo -e "$name: ${RED}✘ NOT RUNNING${NC}"
+  fi
+}
+
+echo
+echo "Status Services VPN:"
+status_service "PPTP" "pptpd"
+status_service "L2TP/IPSec (strongSwan)" "strongswan-starter"
+status_service "L2TP (xl2tpd)" "xl2tpd"
+status_service "SSTP" "sstpd"
+echo
