@@ -1,13 +1,16 @@
 #!/bin/bash
 set -e
 
-echo "[+] Update & install dependencies..."
-apt update && apt install -y accel-ppp accel-ppp-tools openssl
+echo -e "\033[1;36m[+] Menambahkan repository accel-ppp...\033[0m"
+add-apt-repository -y ppa:accel-ppp/accel-ppp > /dev/null 2>&1 || { echo "Gagal menambahkan repository"; exit 1; }
 
-echo "[+] Membuat direktori konfigurasi dan log..."
+echo -e "\033[1;36m[+] Update & install dependencies...\033[0m"
+apt update -y && apt install -y accel-ppp accel-ppp-tools openssl
+
+echo -e "\033[1;36m[+] Membuat direktori konfigurasi dan log...\033[0m"
 mkdir -p /etc/ssl/sstp /var/log/accel-ppp /etc/ppp
 
-echo "[+] Membuat sertifikat self-signed..."
+echo -e "\033[1;36m[+] Membuat sertifikat self-signed...\033[0m"
 openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
  -keyout /etc/ssl/sstp/server.key \
  -out /etc/ssl/sstp/server.crt \
@@ -15,13 +18,14 @@ openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
 
 cp /etc/ssl/sstp/server.crt /etc/ssl/sstp/ca.crt
 
-echo "[+] Membuat file akun SSTP..."
+echo -e "\033[1;36m[+] Membuat file akun SSTP...\033[0m"
 cat <<EOF > /etc/ppp/chap-secrets
+# Contoh format: username * password *
 vpnuser * vpnpassword *
 EOF
 chmod 600 /etc/ppp/chap-secrets
 
-echo "[+] Membuat konfigurasi accel-ppp..."
+echo -e "\033[1;36m[+] Membuat konfigurasi accel-ppp...\033[0m"
 cat <<EOF > /etc/accel-ppp.conf
 [modules]
 log_file
@@ -69,7 +73,7 @@ log-file=/var/log/accel-ppp/accel.log
 level=3
 EOF
 
-echo "[+] Membuat systemd service..."
+echo -e "\033[1;36m[+] Membuat systemd service...\033[0m"
 cat <<EOF > /etc/systemd/system/accel-ppp.service
 [Unit]
 Description=HOKAGE VPN Server
@@ -85,9 +89,12 @@ Type=simple
 WantedBy=multi-user.target
 EOF
 
-echo "[+] Reload daemon & enable service..."
+echo -e "\033[1;36m[+] Reload daemon & enable service...\033[0m"
 systemctl daemon-reload
-systemctl enable accel-ppp
-systemctl restart accel-ppp
+systemctl enable --now accel-ppp
 
-echo "[✓] Instalasi selesai. Cek status dengan: systemctl status accel-ppp"
+echo -e "\033[1;32m[✓] Instalasi selesai!\033[0m"
+echo -e "\033[1;33mPerintah yang berguna:"
+echo -e "• Cek status: systemctl status accel-ppp"
+echo -e "• Restart service: systemctl restart accel-ppp"
+echo -e "• Lihat log: journalctl -u accel-ppp -f\033[0m"
