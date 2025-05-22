@@ -10,9 +10,18 @@ PURPLE='\033[0;38;5;165m'
 ORANGE='\033[0;38;5;208m'
 NC='\033[0m' # No Color
 
+# SoftEther Configuration
+SOFTETHER_DIR="/usr/local/vpnserver"
+VPNCMD="$SOFTETHER_DIR/vpncmd"
+VPNSERVER="$SOFTETHER_DIR/vpnserver"
+CHAP_FILE="/usr/local/vpnserver/vpn_users.conf"
+EXPIRY_FILE="/usr/local/vpnserver/user_expiry.conf"
+LOG_FILE="/var/log/softether.log"
+ADMIN_PASSWORD="Admin123"  # Default admin password from installation
+
 # System Information
-ISP=$(cat /etc/xray/isp 2>/dev/null || echo "Unknown ISP")
-CITY=$(cat /etc/xray/city 2>/dev/null || echo "Unknown City")
+ISP=$(curl -s ipinfo.io/org | cut -d '"' -f 4 2>/dev/null || echo "Unknown ISP")
+CITY=$(curl -s ipinfo.io/city | cut -d '"' -f 4 2>/dev/null || echo "Unknown City")
 IPVPS=$(curl -s ipv4.icanhazip.com || echo "Unknown")
 DOMAIN=$(cat /etc/xray/domain 2>/dev/null || hostname -d 2>/dev/null || echo "No domain")
 RAM=$(free -m | awk 'NR==2 {print $2}')
@@ -25,7 +34,12 @@ DATEVPS=$(date +'%d/%m/%Y')
 TIMEZONE=$(date +'%H:%M:%S')
 UPTIME=$(uptime -p | cut -d " " -f 2-)
 PUBLIC_IP=$(curl -s ifconfig.me || echo "Unknown")
-CITY=$(curl -s ipinfo.io/$PUBLIC_IP | jq -r '.city // "Unknown"')
+
+# Create necessary files if they don't exist
+[ -f "$CHAP_FILE" ] || touch "$CHAP_FILE"
+[ -f "$EXPIRY_FILE" ] || touch "$EXPIRY_FILE"
+[ -f "$LOG_FILE" ] || touch "$LOG_FILE"
+chmod 600 "$CHAP_FILE" "$EXPIRY_FILE" "$LOG_FILE"
 
 # Gradient Text
 gradient() {
@@ -40,96 +54,29 @@ gradient() {
     echo -ne "${output}${NC}"
 }
 
-# Enhanced VPN Service Status Check
-check_vpn_service() {
-    local service_name=$1
-    local port=$2
-    local protocol=$3
-    
-    # Check if service is installed
-    if ! command -v $service_name >/dev/null 2>&1 && ! systemctl list-unit-files | grep -q $service_name; then
-        echo -e "${RED}● NOT INSTALLED${NC}"
-        return
+# Check SoftEther Service Status
+check_softether_status() {
+    if systemctl is-active --quiet vpnserver; then
+        echo -e "${GREEN}● RUNNING${NC}"
+        
+        # Check ports
+        echo -e "\n${CYAN}┌─────────────────── ACTIVE PORTS ───────────────────┐"
+        echo -e "${CYAN}│ ${YELLOW}🔌 HTTPS (Admin): $(ss -tuln | grep -q ':443 ' && echo -e "${GREEN}✓${NC}" || echo -e "${RED}✗${NC}")"
+        echo -e "${CYAN}│ ${YELLOW}🌐 OpenVPN: $(ss -tuln | grep -q ':1194 ' && echo -e "${GREEN}✓${NC}" || echo -e "${RED}✗${NC}")"
+        echo -e "${CYAN}│ ${YELLOW}🛡️ L2TP/IPsec: $(ss -tuln | grep -q ':1701 ' && echo -e "${GREEN}✓${NC}" || echo -e "${RED}✗${NC}")"
+        echo -e "${CYAN}│ ${YELLOW}🔑 SSTP: $(ss -tuln | grep -q ':443 ' && echo -e "${GREEN}✓${NC}" || echo -e "${RED}✗${NC}")"
+        echo -e "${CYAN}│ ${YELLOW}🚪 Admin Console: $(ss -tuln | grep -q ':5555 ' && echo -e "${GREEN}✓${NC}" || echo -e "${RED}✗${NC}")"
+        echo -e "${CYAN}└──────────────────────────────────────────────────────┘${NC}"
+    else
+        echo -e "${RED}● STOPPED${NC}"
     fi
-
-    # Check service status
-    case $service_name in
-        "pptpd")
-            if systemctl is-active --quiet $service_name 2>/dev/null || pgrep pptpd >/dev/null; then
-                service_status="${GREEN}● RUNNING${NC}"
-            else
-                service_status="${RED}● STOPPED${NC}"
-            fi
-            
-            if ss -tuln | grep -q ":$port "; then
-                port_status="${GREEN}✓${NC}"
-            else
-                port_status="${RED}✗${NC}"
-                if ping -c 1 -w 1 $PUBLIC_IP | grep -q "ttl"; then
-                    port_status="${GREEN}✓ (GRE)${NC}"
-                    service_status="${GREEN}● RUNNING${NC}"
-                fi
-            fi
-            ;;
-            
-        "accel-ppp")
-            if systemctl is-active --quiet $service_name 2>/dev/null; then
-                service_status="${GREEN}● RUNNING${NC}"
-            else
-                service_status="${RED}● STOPPED${NC}"
-            fi
-            
-            if ss -tuln | grep -q ":$port "; then
-                port_status="${GREEN}✓${NC}"
-            else
-                port_status="${RED}✗${NC}"
-            fi
-            ;;
-            
-        "xl2tpd")
-            if systemctl is-active --quiet $service_name 2>/dev/null; then
-                service_status="${GREEN}● RUNNING${NC}"
-            else
-                service_status="${RED}● STOPPED${NC}"
-            fi
-            
-            if ss -tuln | grep -q ":$port "; then
-                port_status="${GREEN}✓${NC}"
-            else
-                port_status="${RED}✗${NC}"
-                if ipsec status | grep -q "INSTALLED"; then
-                    port_status="${GREEN}✓ (IPSec)${NC}"
-                    service_status="${GREEN}● RUNNING${NC}"
-                fi
-            fi
-            ;;
-            
-        *)
-            service_status="${RED}● UNKNOWN SERVICE${NC}"
-            port_status="${YELLOW}?${NC}"
-            ;;
-    esac
-    
-    echo -e "$service_status (Port $port: $port_status)"
 }
-
-# Paths
-CHAP_FILE="/etc/ppp/chap-secrets"
-EXPIRY_FILE="/etc/ppp/account_expiry"
-LOG_FILE="/var/log/vpn_users.log"
-SSTP_CONFIG="/etc/accel-ppp.conf"
-
-# Create necessary files if they don't exist
-[ -f "$CHAP_FILE" ] || touch "$CHAP_FILE"
-[ -f "$EXPIRY_FILE" ] || touch "$EXPIRY_FILE"
-[ -f "$LOG_FILE" ] || touch "$LOG_FILE"
-chmod 600 "$CHAP_FILE" "$EXPIRY_FILE"
 
 # Display Header
 display_header() {
     clear
     echo -e "${PURPLE}╔════════════════════════════════════════════════════════════════════╗"
-    gradient "                H O K A G E   V P N   M A N A G E R  P R O               "
+    gradient "                S O F T E T H E R   V P N   M A N A G E R               "
     echo -e "\n${PURPLE}╚════════════════════════════════════════════════════════════════════╝${NC}"
     
     # System Information Display
@@ -143,10 +90,8 @@ display_header() {
     echo -e "${CYAN}│ ${YELLOW}💾 RAM Usage   : ${USAGERAM}MB / ${RAM}MB (${MEMOFREE})"
     echo -e "${CYAN}│ ${YELLOW}⚡ CPU Load    : ${LOADCPU} | Cores: ${CORE}"
     echo -e "${CYAN}└──────────────────────────────────────────────────────────────────┘${NC}"
-    echo -e "${CYAN}┌─────────────────────── VPN SERVICE STATUS ───────────────────────┐"
-    echo -e "${CYAN}│ ${YELLOW}🔌 PPTP Service : $(check_vpn_service pptpd 1723 tcp)"
-    echo -e "${CYAN}│ ${YELLOW}🌐 SSTP Service : $(check_vpn_service accel-ppp 4433 tcp)"
-    echo -e "${CYAN}│ ${YELLOW}🛡️ L2TP Service : $(check_vpn_service xl2tpd 1701 udp)"
+    echo -e "${CYAN}┌────────────────────── VPN SERVICE STATUS ───────────────────────┐"
+    echo -e "${CYAN}│ ${YELLOW}🔌 SoftEther VPN : $(check_softether_status)"
     echo -e "${CYAN}└──────────────────────────────────────────────────────────────────┘${NC}"
     echo ""
 }
@@ -166,30 +111,6 @@ calculate_expiry() {
     else
         date -d "+1 month" +"%Y-%m-%d"
     fi
-}
-
-# VPN Service Management
-manage_vpn_service() {
-    local service=$1
-    local action=$2
-    
-    case $service in
-        "pptpd")
-            if [[ $action == "restart" ]]; then
-                systemctl restart pptpd 2>/dev/null || service pptpd restart 2>/dev/null
-                iptables -I INPUT -p gre -j ACCEPT
-            fi
-            ;;
-        "accel-ppp")
-            systemctl $action accel-ppp 2>/dev/null
-            ;;
-        "xl2tpd")
-            systemctl $action xl2tpd 2>/dev/null
-            if [[ $action == "restart" ]]; then
-                systemctl restart ipsec 2>/dev/null
-            fi
-            ;;
-    esac
 }
 
 # Create VPN User
@@ -226,13 +147,15 @@ create_vpn_user() {
         
         read -rp "$(echo -e "${YELLOW}▶ Confirm creation? [y/N]: ${NC}")" confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
-            echo "$user * $pass *" >> "$CHAP_FILE"
+            # Create user in SoftEther
+            $VPNCMD localhost /SERVER /PASSWORD:$ADMIN_PASSWORD /HUB:DEFAULT /CMD UserCreate $user /GROUP:none /REALNAME:"VPN User" /NOTE:"Created on $(date)"
+            $VPNCMD localhost /SERVER /PASSWORD:$ADMIN_PASSWORD /HUB:DEFAULT /CMD UserPasswordSet $user /PASSWORD:$pass
+            
+            # Store in local files
+            echo "$user $pass" >> "$CHAP_FILE"
             echo "$user $expiry_date" >> "$EXPIRY_FILE"
             echo "$(date '+%Y-%m-%d %H:%M:%S') - Created user: $user (Expiry: $expiry_date)" >> "$LOG_FILE"
             echo -e "${GREEN}✔ User $user created successfully!${NC}"
-            
-            # Restart services to apply changes
-            manage_vpn_service accel-ppp restart
             return 0
         else
             echo -e "${YELLOW}✖ User creation cancelled${NC}"
@@ -266,13 +189,14 @@ delete_vpn_user() {
     if grep -q "^$user " "$CHAP_FILE"; then
         read -rp "$(echo -e "${RED}⚠ Are you sure you want to delete $user? [y/N]: ${NC}")" confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            # Delete from SoftEther
+            $VPNCMD localhost /SERVER /PASSWORD:$ADMIN_PASSWORD /HUB:DEFAULT /CMD UserDelete $user
+            
+            # Remove from local files
             sed -i "/^$user /d" "$CHAP_FILE"
             sed -i "/^$user /d" "$EXPIRY_FILE"
             echo "$(date '+%Y-%m-%d %H:%M:%S') - Deleted user: $user" >> "$LOG_FILE"
             echo -e "${GREEN}✔ User $user deleted successfully${NC}"
-            
-            # Restart services to apply changes
-            manage_vpn_service accel-ppp restart
         else
             echo -e "${YELLOW}✖ User deletion cancelled${NC}"
         fi
@@ -322,58 +246,43 @@ view_all_users() {
     read -rp "$(echo -e "${YELLOW}▶ Press Enter to return...${NC}")"
 }
 
-# Restart VPN Services
-restart_vpn_services() {
-    echo -e "${YELLOW}Restarting all VPN services...${NC}"
+# Restart VPN Service
+restart_vpn_service() {
+    echo -e "${YELLOW}Restarting SoftEther VPN service...${NC}"
+    systemctl restart vpnserver
+    sleep 2
     
-    echo -e "${BLUE}▶ Restarting PPTP...${NC}"
-    manage_vpn_service pptpd restart
-    
-    echo -e "${BLUE}▶ Restarting SSTP...${NC}"
-    manage_vpn_service accel-ppp restart
-    
-    echo -e "${BLUE}▶ Restarting L2TP/IPSec...${NC}"
-    manage_vpn_service xl2tpd restart
-    
-    echo -e "${GREEN}✔ All VPN services restarted successfully${NC}"
+    if systemctl is-active --quiet vpnserver; then
+        echo -e "${GREEN}✔ SoftEther VPN service restarted successfully${NC}"
+    else
+        echo -e "${RED}✖ Failed to restart SoftEther VPN service${NC}"
+    fi
     sleep 2
 }
 
-# Fix VPN Services
-fix_vpn_services() {
-    echo -e "${YELLOW}Running VPN service diagnostics and repairs...${NC}"
+# Check VPN Server Status
+check_server_status() {
+    echo -e "${YELLOW}Checking SoftEther VPN server status...${NC}"
     
-    # Check and fix PPTP
-    if ! pgrep pptpd >/dev/null; then
-        echo -e "${BLUE}▶ Starting PPTP service...${NC}"
-        manage_vpn_service pptpd start
-        iptables -I INPUT -p gre -j ACCEPT
+    # Check service status
+    if systemctl is-active --quiet vpnserver; then
+        echo -e "${GREEN}● Service is running${NC}"
+    else
+        echo -e "${RED}● Service is not running${NC}"
     fi
     
-    # Check and fix SSTP
-    if ! systemctl is-active --quiet accel-ppp; then
-        echo -e "${BLUE}▶ Starting SSTP service...${NC}"
-        manage_vpn_service accel-ppp start
+    # Check connection to admin port
+    if $VPNCMD localhost /SERVER /PASSWORD:$ADMIN_PASSWORD /CMD About >/dev/null 2>&1; then
+        echo -e "${GREEN}● Admin interface is accessible${NC}"
+    else
+        echo -e "${RED}● Cannot connect to admin interface${NC}"
     fi
     
-    # Check and fix L2TP/IPSec
-    if ! systemctl is-active --quiet xl2tpd; then
-        echo -e "${BLUE}▶ Starting L2TP/IPSec services...${NC}"
-        manage_vpn_service xl2tpd start
-        systemctl start ipsec 2>/dev/null
-        iptables -I INPUT -p udp --dport 500 -j ACCEPT
-        iptables -I INPUT -p udp --dport 4500 -j ACCEPT
-    fi
+    # Check active users
+    active_users=$($VPNCMD localhost /SERVER /PASSWORD:$ADMIN_PASSWORD /HUB:DEFAULT /CMD SessionList | grep -c "Session Name")
+    echo -e "${YELLOW}● Active connections: ${GREEN}$active_users${NC}"
     
-    # Verify services
-    echo -e "${CYAN}┌────────────────── SERVICE STATUS AFTER FIX ─────────────────┐"
-    echo -e "${CYAN}│ ${YELLOW}🔌 PPTP Service : $(check_vpn_service pptpd 1723 tcp)"
-    echo -e "${CYAN}│ ${YELLOW}🌐 SSTP Service : $(check_vpn_service accel-ppp 4433 tcp)"
-    echo -e "${CYAN}│ ${YELLOW}🛡️ L2TP Service : $(check_vpn_service xl2tpd 1701 udp)"
-    echo -e "${CYAN}└────────────────────────────────────────────────────────────┘${NC}"
-    
-    echo -e "${GREEN}✔ VPN service repairs completed${NC}"
-    sleep 2
+    read -rp "$(echo -e "${YELLOW}▶ Press Enter to return...${NC}")"
 }
 
 # Main Menu
@@ -384,8 +293,8 @@ while true; do
     echo -e "${CYAN}│ ${BLUE}1. ${YELLOW}➕ Create new VPN user account${NC}                   │"
     echo -e "${CYAN}│ ${BLUE}2. ${YELLOW}➖ Delete VPN user account${NC}                      │"
     echo -e "${CYAN}│ ${BLUE}3. ${YELLOW}👥 View all VPN users${NC}                          │"
-    echo -e "${CYAN}│ ${BLUE}4. ${YELLOW}🔄 Restart all VPN services${NC}                     │"
-    echo -e "${CYAN}│ ${BLUE}5. ${YELLOW}🔧 Fix VPN services${NC}                            │"
+    echo -e "${CYAN}│ ${BLUE}4. ${YELLOW}🔄 Restart VPN service${NC}                         │"
+    echo -e "${CYAN}│ ${BLUE}5. ${YELLOW}📊 Check server status${NC}                         │"
     echo -e "${CYAN}│ ${BLUE}0. ${YELLOW}🚪 Exit${NC}                                       │"
     echo -e "${CYAN}└──────────────────────────────────────────────────────────┘${NC}"
     echo ""
@@ -396,8 +305,8 @@ while true; do
         1) create_vpn_user ;;
         2) delete_vpn_user ;;
         3) view_all_users ;;
-        4) restart_vpn_services ;;
-        5) fix_vpn_services ;;
+        4) restart_vpn_service ;;
+        5) check_server_status ;;
         0)
             echo -e "${BLUE}👋 Goodbye!${NC}"
             exit 0
