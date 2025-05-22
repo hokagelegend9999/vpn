@@ -17,6 +17,14 @@ SOFTETHER_VERSION="4.44-9807-rtm"
 DOWNLOAD_URL="https://github.com/SoftEtherVPN/SoftEtherVPN_Stable/releases/download/v4.44-9807-rtm/softether-vpnserver-v4.44-9807-rtm-2025.04.16-linux-arm64-64bit.tar.gz"
 ALTERNATE_URL="http://github.com/SoftEtherVPN/SoftEtherVPN_Stable/releases/download/v4.44-9807-rtm/softether-vpnserver-v4.44-9807-rtm-2025.04.16-linux-arm64-64bit.tar.gz"
 
+# Verifikasi arsitektur
+ARCH=$(uname -m)
+if [ "$ARCH" != "aarch64" ] && [ "$ARCH" != "arm64" ]; then
+    echo -e "${RED}[ERROR] Script ini hanya untuk sistem ARM64 (aarch64)${NC}"
+    echo -e "${YELLOW}Arsitektur sistem Anda: $ARCH${NC}"
+    exit 1
+fi
+
 # ==============================================
 # FUNGSI UTILITAS
 # ==============================================
@@ -52,7 +60,8 @@ function handle_error() {
 function install_softether() {
     echo -e "${BLUE}[+] Menginstall dependencies...${NC}"
     apt-get update
-    apt-get install -y build-essential libreadline-dev libssl-dev libncurses-dev zlib1g-dev wget
+    apt-get install -y build-essential libreadline-dev libssl-dev libncurses-dev zlib1g-dev wget \
+        gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
     
     echo -e "${BLUE}[+] Mengunduh SoftEther VPN ${SOFTETHER_VERSION}...${NC}"
     
@@ -79,7 +88,12 @@ function install_softether() {
     cd /tmp/vpnserver
     
     echo -e "${BLUE}[+] Kompilasi...${NC}"
-    make
+    # Bersihkan file objek sebelumnya
+    find . -type f -name "*.o" -exec rm -f {} \;
+    make clean
+    
+    # Kompilasi dengan flag ARM64
+    make CC="gcc -march=armv8-a" CXX="g++ -march=armv8-a" -j$(nproc)
     
     echo -e "${BLUE}[+] Menginstall ke /usr/local/vpnserver...${NC}"
     mkdir -p /usr/local/vpnserver
@@ -110,7 +124,6 @@ EOL
     systemctl enable vpnserver
     systemctl start vpnserver
 }
-
 # ==============================================
 # KONFIGURASI DASAR SOFTETHER
 # ==============================================
