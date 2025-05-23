@@ -43,8 +43,7 @@ rm installer-sstp.sh
 ```
 
 ```
-cd
-/usr/local/sbin/
+cd /usr/local/sbin/
 rm vpn
 wget https://raw.githubusercontent.com/hokagelegend9999/vpn/refs/heads/main/vpn && sudo chmod +x vpn
 cd
