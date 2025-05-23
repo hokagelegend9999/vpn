@@ -154,7 +154,8 @@ function main_menu() {
   echo "5) Status Layanan VPN"
   echo "6) Panduan Koneksi VPN"
   echo "7) Keluar"
-  echo -n "Pilih menu [1-7]: "
+  echo "8) menu"
+  echo -n "Pilih menu [1-8]: "
   read pilihan
   case $pilihan in
     1) add_pptp_user ;;
@@ -163,6 +164,7 @@ function main_menu() {
     4) delete_user ;;
     5) show_status ;;
     6) connection_guide ;;
+    8) menu ;;
     7) echo "Keluar..."; exit 0 ;;
     *) echo -e "${RED}Pilihan tidak valid.${NC}" ;;
   esac
