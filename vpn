@@ -1,6 +1,7 @@
 #!/bin/bash
 
 GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
@@ -23,7 +24,15 @@ function add_pptp_user() {
   read password
   
   echo "$username pptpd $password *" >> /etc/ppp/chap-secrets
-  echo "User PPTP $username berhasil ditambahkan!"
+  echo -e "${GREEN}User PPTP $username berhasil ditambahkan!${NC}"
+  echo ""
+  echo -e "${YELLOW}=== Cara Menggunakan Akun PPTP ==="
+  echo "Server: $SERVER_IP"
+  echo "Username: $username"
+  echo "Password: $password"
+  echo "Encryption: MPPE 128-bit"
+  echo "=======================${NC}"
+  echo ""
   systemctl restart pptpd
 }
 
@@ -32,47 +41,110 @@ function add_l2tp_user() {
   read username
   echo -n "Masukkan password L2TP: "
   read password
+  echo -n "Masukkan Pre-Shared Key (biarkan kosong untuk default): "
+  read psk
+  
+  # Jika PSK kosong, gunakan default dari file config
+  if [ -z "$psk" ]; then
+    psk=$(grep -oP '(?<=: PSK ")[^"]+' /etc/ipsec.secrets 2>/dev/null || echo "myvpnkey")
+  fi
   
   echo "$username * $password *" >> /etc/ppp/chap-secrets
-  echo "User L2TP $username berhasil ditambahkan!"
+  echo -e "${GREEN}User L2TP $username berhasil ditambahkan!${NC}"
+  echo ""
+  echo -e "${YELLOW}=== Cara Menggunakan Akun L2TP/IPSec ==="
+  echo "Server: $SERVER_IP"
+  echo "Username: $username"
+  echo "Password: $password"
+  echo "Pre-Shared Key: $psk"
+  echo "Type: L2TP/IPSec PSK"
+  echo "=======================${NC}"
+  echo ""
   systemctl restart xl2tpd
+  systemctl restart strongswan-starter
 }
 
 function list_users() {
-  echo "Daftar User PPTP:"
-  echo "----------------"
-  cat /etc/ppp/chap-secrets | grep pptpd
+  echo -e "${YELLOW}=== Daftar User PPTP ==="
+  echo "Format: [Username] [Password]"
+  echo "----------------${NC}"
+  grep pptpd /etc/ppp/chap-secrets | awk '{print $1,$3}'
   echo ""
-  echo "Daftar User L2TP:"
-  echo "----------------"
-  cat /etc/ppp/chap-secrets | grep -v pptpd
+  echo -e "${YELLOW}=== Daftar User L2TP ==="
+  echo "Format: [Username] [Password]"
+  echo "----------------${NC}"
+  grep -v pptpd /etc/ppp/chap-secrets | awk '{print $1,$3}'
+  echo ""
+  echo -e "${YELLOW}=== Informasi Koneksi ==="
+  echo "IP Server: $SERVER_IP"
+  echo "PSK L2TP: $(grep -oP '(?<=: PSK ")[^"]+' /etc/ipsec.secrets 2>/dev/null || echo 'myvpnkey')"
+  echo "=======================${NC}"
 }
 
 function delete_user() {
   echo -n "Masukkan username yang akan dihapus: "
   read username
   
-  sed -i "/^$username /d" /etc/ppp/chap-secrets
-  echo "User $username berhasil dihapus!"
-  systemctl restart pptpd
-  systemctl restart xl2tpd
+  if sed -i "/^$username /d" /etc/ppp/chap-secrets; then
+    echo -e "${GREEN}User $username berhasil dihapus!${NC}"
+    systemctl restart pptpd
+    systemctl restart xl2tpd
+  else
+    echo -e "${RED}Gagal menghapus user $username${NC}"
+  fi
 }
 
 function show_status() {
-  echo "Status Layanan VPN:"
+  echo -e "${YELLOW}=== Status Layanan VPN ==="
   status_service "PPTP" "pptpd"
   status_service "L2TP/IPSec (strongSwan)" "strongswan-starter"
   status_service "L2TP (xl2tpd)" "xl2tpd"
-  status_service "SSTP" "sstpd"
   echo ""
+  echo "=== Informasi Koneksi ==="
   echo "IP Server: $SERVER_IP"
+  echo "PSK L2TP: $(grep -oP '(?<=: PSK ")[^"]+' /etc/ipsec.secrets 2>/dev/null || echo 'myvpnkey')"
+  echo "=======================${NC}"
+}
+
+function connection_guide() {
+  echo -e "${YELLOW}=== Panduan Koneksi VPN ===${NC}"
+  echo ""
+  echo -e "${GREEN}1. Cara Menggunakan PPTP:${NC}"
+  echo "- Di Windows:"
+  echo "  a. Buka Network Settings > VPN > Add VPN"
+  echo "  b. Pilih PPTP, masukkan:"
+  echo "     Server: $SERVER_IP"
+  echo "     Username & Password: lihat di daftar user"
+  echo "     Encryption: Automatic"
+  echo ""
+  echo "- Di Android:"
+  echo "  a. Settings > Network > VPN > Add VPN"
+  echo "  b. Pilih PPTP, masukkan detail server dan akun"
+  echo ""
+  echo -e "${GREEN}2. Cara Menggunakan L2TP/IPSec:${NC}"
+  echo "- Di Windows:"
+  echo "  a. Buka Network Settings > VPN > Add VPN"
+  echo "  b. Pilih L2TP/IPSec, masukkan:"
+  echo "     Server: $SERVER_IP"
+  echo "     Username & Password: lihat di daftar user"
+  echo "     Pre-shared key: $(grep -oP '(?<=: PSK ")[^"]+' /etc/ipsec.secrets 2>/dev/null || echo 'myvpnkey')"
+  echo "     Type: Pre-shared key"
+  echo ""
+  echo "- Di Android:"
+  echo "  a. Settings > Network > VPN > Add VPN"
+  echo "  b. Pilih L2TP/IPSec PSK, masukkan detailnya"
+  echo ""
+  echo -e "${YELLOW}Catatan:${NC}"
+  echo "- Pastikan layanan VPN aktif sebelum menghubungkan"
+  echo "- Gunakan password yang kuat untuk keamanan"
+  echo "==================================${NC}"
 }
 
 function main_menu() {
   clear
-  echo "=============================="
+  echo -e "${YELLOW}================================"
   echo "  VPN User Management"
-  echo "=============================="
+  echo "================================${NC}"
   echo "Server IP: $SERVER_IP"
   echo ""
   echo "1) Tambah User PPTP"
@@ -80,8 +152,9 @@ function main_menu() {
   echo "3) Lihat Daftar User"
   echo "4) Hapus User"
   echo "5) Status Layanan VPN"
-  echo "6) Keluar"
-  echo -n "Pilih menu [1-6]: "
+  echo "6) Panduan Koneksi VPN"
+  echo "7) Keluar"
+  echo -n "Pilih menu [1-7]: "
   read pilihan
   case $pilihan in
     1) add_pptp_user ;;
@@ -89,8 +162,9 @@ function main_menu() {
     3) list_users ;;
     4) delete_user ;;
     5) show_status ;;
-    6) echo "Keluar..."; exit 0 ;;
-    *) echo "Pilihan tidak valid." ;;
+    6) connection_guide ;;
+    7) echo "Keluar..."; exit 0 ;;
+    *) echo -e "${RED}Pilihan tidak valid.${NC}" ;;
   esac
   echo ""
   read -p "Tekan ENTER untuk kembali ke menu..."
@@ -99,7 +173,7 @@ function main_menu() {
 
 # Check if script is run as root
 if [ "$(id -u)" != "0" ]; then
-  echo "Script harus dijalankan sebagai root" 1>&2
+  echo -e "${RED}Script harus dijalankan sebagai root${NC}" 1>&2
   exit 1
 fi
 
